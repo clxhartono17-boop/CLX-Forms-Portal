@@ -4,7 +4,7 @@ import { MOCK_USERS } from '../utils/authConfig.ts';
 import { syncUserRegistrationToGoogleSheets, fetchUsersFromGoogleSheets } from '../utils/googleIntegration.ts';
 
 interface AuthContextType {
-  currentUser: User;
+  currentUser: User | null;
   currentRole: UserRole;
   registeredUsers: User[];
   isLoggedIn: boolean;
@@ -42,7 +42,7 @@ const DEFAULT_USERS: User[] = [
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [registeredUsers, setRegisteredUsers] = useState<User[]>([]);
 
-  const [currentUser, setCurrentUser] = useState<User>(() => {
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
       const saved = localStorage.getItem(ACTIVE_USER_KEY);
       if (saved) {
@@ -51,19 +51,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (e) {
       console.warn('Failed to parse active user:', e);
     }
-    return MOCK_USERS.Staff; // Fallback jika belum login
+    return null; // Pastikan kosong jika belum ada yang login
   });
 
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(true); // Sesuai default sebelumnya
-  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
+  // KUNCI UTAMA: Default harus false agar user tidak bisa tembus portal
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false); 
+  const [showAuthModal, setShowAuthModal] = useState<boolean>(true);
 
   // 1. Tarik Data User dari Google Sheets saat aplikasi dibuka
   const loadUsersFromSheets = useCallback(async () => {
     try {
       const rawRows = await fetchUsersFromGoogleSheets();
       
-      // Map row dari Sheet kembali ke tipe User
-      // Asumsi format array: [ID, Nama, Email, Role, Divisi, Telepon, Tanggal Registrasi, Status, Password]
       const parsedUsers: User[] = rawRows.map((row: any) => ({
         id: row[0] || `usr_${Math.random().toString(36).substring(2, 6)}`,
         name: row[1] || 'Unknown',
@@ -72,14 +71,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         division: (row[4] as Division) || 'General',
         phone: row[5] !== '-' ? row[5] : undefined,
         registeredAt: row[6],
-        // Catatan: Jika ada logic password, bisa ditambahkan di row berikutnya sesuai urutan kolom Sheet
       }));
 
-      // Gabungkan dengan MOCK_USERS agar akun testing tetap bisa login jika Sheet kosong
       const combinedUsers = [...DEFAULT_USERS];
       
       parsedUsers.forEach(sheetUser => {
-        // Mencegah duplikasi jika email sama
         const exists = combinedUsers.findIndex(u => u.email.toLowerCase() === sheetUser.email.toLowerCase());
         if (exists >= 0) {
           combinedUsers[exists] = sheetUser;
@@ -104,7 +100,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     loadUsersFromSheets();
   }, [loadUsersFromSheets]);
 
-  // 2. Simpan cadangan ke LocalStorage
   useEffect(() => {
     try {
       if (registeredUsers.length > 0) {
@@ -115,11 +110,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [registeredUsers]);
 
+  // Cek local storage untuk mempertahankan sesi login jika di-refresh
   useEffect(() => {
-    try {
-      localStorage.setItem(ACTIVE_USER_KEY, JSON.stringify(currentUser));
-    } catch (e) {
-      console.warn('Failed to save active user:', e);
+    if (currentUser) {
+      setIsLoggedIn(true);
+      setShowAuthModal(false);
+      try {
+        localStorage.setItem(ACTIVE_USER_KEY, JSON.stringify(currentUser));
+      } catch (e) {
+        console.warn('Failed to save active user:', e);
+      }
+    } else {
+      setIsLoggedIn(false);
+      setShowAuthModal(true);
     }
   }, [currentUser]);
 
@@ -154,16 +157,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       registeredAt: new Date().toISOString(),
     };
 
-    // Update di State lokal agar langsung bisa login
     setRegisteredUsers(prev => {
       const filtered = prev.filter(u => u.email.toLowerCase() !== newUser.email.toLowerCase());
       return [...filtered, newUser];
     });
 
     setCurrentUser(newUser);
-    setIsLoggedIn(true);
 
-    // Sync ke Google Sheets tab "Master Login" secara REAL
     try {
       await syncUserRegistrationToGoogleSheets(newUser);
     } catch (err) {
@@ -181,15 +181,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const found = registeredUsers.find(u => u.email.toLowerCase() === email.trim().toLowerCase());
     if (found) {
       setCurrentUser(found);
-      setIsLoggedIn(true);
       return { success: true, message: `Selamat datang kembali, ${found.name}!` };
     }
     return { success: false, message: 'Email tidak ditemukan. Silakan registrasi terlebih dahulu.' };
   };
 
   const logout = () => {
+    setCurrentUser(null);
     setIsLoggedIn(false);
     setShowAuthModal(true);
+    localStorage.removeItem(ACTIVE_USER_KEY);
   };
 
   const currentRole = currentUser?.role || 'Staff';
