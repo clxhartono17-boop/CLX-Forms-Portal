@@ -279,8 +279,8 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
                 },
                 {
                   type: 'PFB' as FormType,
-                  title: 'PFB',
-                  subtitle: 'Permohonan Faktur Biaya',
+                  title: 'FPP',
+                  subtitle: 'Form Permohonan Pembayaran',
                   desc: 'BBM Solar, Biaya Toll, Port Handling, Faktur Pajak',
                   color: 'border-indigo-500 bg-indigo-50/50 text-indigo-900',
                 },
