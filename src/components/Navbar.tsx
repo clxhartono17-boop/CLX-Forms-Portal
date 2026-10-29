@@ -37,8 +37,9 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenR
                 <span className="font-bold text-base tracking-tight text-white">
                   PT. CONNECTIVITY LEADS EXCELLENCE
                 </span>
+                {/* Diubah dari PFB ke FPP */}
                 <span className="hidden sm:inline-block text-[11px] font-medium bg-blue-950 text-blue-300 border border-blue-800 px-2 py-0.5 rounded">
-                  FPU / PFB / FPPB Portal
+                  FPU / FPP / FPPB Portal
                 </span>
               </div>
               <p className="text-xs text-slate-400 hidden sm:block">
