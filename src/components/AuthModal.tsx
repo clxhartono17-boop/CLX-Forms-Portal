@@ -26,7 +26,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
   initialMode = 'register',
 }) => {
-  const { registerUser, loginUser } = useAuth();
+  // 1. Tambahkan isLoggedIn dari context
+  const { registerUser, loginUser, isLoggedIn } = useAuth();
 
   const [mode, setMode] = useState<'login' | 'register'>(initialMode);
   const [name, setName] = useState('');
@@ -35,7 +36,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [role, setRole] = useState<UserRole>('Staff');
   const [division, setDivision] = useState<Division>('Finance');
   const [phone, setPhone] = useState('');
-  const [signatureFile, setSignatureFile] = useState<File | null>(null); // State untuk file tanda tangan
+  const [signatureFile, setSignatureFile] = useState<File | null>(null); 
   const [feedback, setFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -57,9 +58,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     setIsSubmitting(true);
     try {
-      // Catatan: Jika ingin menyimpan file, Anda bisa memproses 'signatureFile' menjadi Base64 
-      // di sini atau meneruskannya ke fungsi registerUser untuk diupload ke Google Drive/Sheets.
-      
       const res = await registerUser({
         name,
         email,
@@ -100,8 +98,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
+  // Kunci layar belakang (mencegah user klik keluar modal jika belum login)
+  const handleBackdropClick = (e: React.MouseEvent) => {
+    if (e.target === e.currentTarget && isLoggedIn) {
+      onClose();
+    }
+  };
+
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+    <div 
+      className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
+      onClick={handleBackdropClick} // Memungkinkan tutup dengan klik luar HANYA jika sudah login
+    >
       <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         {/* Modal Top Banner */}
         <div className="bg-slate-900 text-white p-5 flex items-center justify-between border-b border-slate-800">
@@ -118,12 +126,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-white rounded-lg transition"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          
+          {/* 2. Sembunyikan Tombol X jika belum login */}
+          {isLoggedIn && (
+            <button
+              onClick={onClose}
+              className="p-1.5 text-slate-400 hover:text-white rounded-lg transition"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
 
         {/* Notice: Synced with Google Sheets "Master Login" */}
@@ -262,7 +274,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:bg-white text-slate-800 font-bold"
                   >
                     <option value="Staff">Staff (Maker)</option>
-                    <option value="CSO">CSO (Chief Services Officer)</option>
+                    {/* 3. Ubah Strategy menjadi Service */}
+                    <option value="CSO">CSO (Chief Service Officer)</option>
                     <option value="COO">COO (Chief Operating Officer)</option>
                     <option value="CFO">CFO (Chief Financial Officer)</option>
                     <option value="CEO">CEO (Chief Executive Officer)</option>
@@ -304,7 +317,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
               </div>
 
-              {/* Tambahan Form Tanda Tangan Digital */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Upload Tanda Tangan (Digital Sign) <span className="text-red-500">*</span>
