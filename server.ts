@@ -1,110 +1,129 @@
-import express, { Request, Response } from 'express';
-import { createServer as createViteServer } from 'vite';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import express from 'express';
+import cors from 'cors';
+import { google } from 'googleapis';
+import dotenv from 'dotenv';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+dotenv.config();
 
-async function startServer() {
-  const app = express();
-  const PORT = process.env.PORT || 3000;
+const app = express();
+app.use(cors());
+app.use(express.json());
 
-  app.use(express.json({ limit: '50mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+// ID Sheet Anda (Bisa dipindah ke .env nantinya)
+const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID || '1irb4RR0LMMBqRfGP4gxvX82c0nLfWIXKHzQ_tqC3h8c';
 
-  // API Route: Google Drive Upload (Supports nested folder creation and file upload)
-  app.post('/api/google/drive-upload', async (req: Request, res: Response) => {
-    try {
-      const { doc, folderPath, parentFolderId, fileName } = req.body;
-      const fileId = `gdrive_${doc?.formType?.toLowerCase() || 'form'}_${Date.now()}`;
-      const folderId = `folder_${Date.now()}`;
+// Fungsi Inisialisasi Kredensial Google
+const getGoogleAuth = () => {
+  const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  // Handle escape character \n dari file .env
+  const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n');
 
-      // In production with credentials:
-      // Calls Google Drive API files.create for nested folders and upload
-      res.json({
-        success: true,
-        fileId,
-        fileName: fileName || `${doc?.docNumber}_merged.pdf`,
-        folderPath: folderPath || 'FPU / October / 29 / FPU-0001',
-        folderId,
-        parentFolderId: parentFolderId || '1hgUyTqNsfJsC30pY7O2kPS95DqEEySm9',
-        webViewLink: `https://drive.google.com/file/d/${fileId}/view?usp=sharing`,
-        webContentLink: `https://drive.google.com/uc?id=${fileId}&export=download`,
-        uploadedAt: new Date().toISOString(),
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Drive upload failed' });
-    }
-  });
-
-  // API Route: Google Sheets Append / Update
-  app.post('/api/google/sheets-sync', async (req: Request, res: Response) => {
-    try {
-      const { spreadsheetId, sheetName, row } = req.body;
-
-      // In production with credentials:
-      // Calls Google Sheets API spreadsheets.values.append
-      res.json({
-        success: true,
-        spreadsheetId: spreadsheetId || '1irb4RR0LMMBqRfGP4gxvX82c0nLfWIXKHzQ_tqC3h8c',
-        sheetName: sheetName || 'Rekapan Form',
-        updatedRange: `'${sheetName || 'Rekapan Form'}'!A:V`,
-        rowNumber: Math.floor(Math.random() * 50) + 2,
-        syncedAt: new Date().toISOString(),
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Sheets sync failed' });
-    }
-  });
-
-  // API Route: User Registration sync to Master Login
-  app.post('/api/google/register-user', async (req: Request, res: Response) => {
-    try {
-      const { spreadsheetId, sheetName, user, row } = req.body;
-      res.json({
-        success: true,
-        spreadsheetId: spreadsheetId || '1irb4RR0LMMBqRfGP4gxvX82c0nLfWIXKHzQ_tqC3h8c',
-        sheetName: sheetName || 'Master Login',
-        user: {
-          id: user?.id,
-          name: user?.name,
-          email: user?.email,
-          role: user?.role,
-          division: user?.division,
-        },
-        updatedRange: `'${sheetName || 'Master Login'}'!A:H`,
-        rowNumber: Math.floor(Math.random() * 20) + 2,
-        syncedAt: new Date().toISOString(),
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'User registration sync failed' });
-    }
-  });
-
-  // Health check
-  app.get('/api/health', (_req: Request, res: Response) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
-  });
-
-  // Mount Vite middleware in development
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    // Production static serving
-    app.use(express.static(path.resolve(__dirname, 'dist')));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
-    });
+  if (!clientEmail || !privateKey) {
+    throw new Error("Kredensial Google Service Account tidak ditemukan di .env");
   }
 
-  app.listen(PORT, () => {
-    console.log(`Server listening on port ${PORT}`);
-  });
-}
+  return new google.auth.JWT(
+    clientEmail,
+    undefined,
+    privateKey,
+    ['https://www.googleapis.com/auth/spreadsheets']
+  );
+};
 
-startServer();
+const sheets = google.sheets('v4');
+
+// 1. GET: Ambil Data Form (Read)
+app.get('/api/google/forms', async (req, res) => {
+  try {
+    const auth = getGoogleAuth();
+    const response = await sheets.spreadsheets.values.get({
+      auth,
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Rekapan Form!A2:Z', // Mulai dari baris 2 untuk melewati Header
+    });
+    
+    res.json({ success: true, data: response.data.values || [] });
+  } catch (error: any) {
+    console.error('Error fetching forms:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 2. POST: Simpan Form Baru (Write)
+app.post('/api/google/sheets-sync', async (req, res) => {
+  try {
+    const { formData } = req.body;
+    const auth = getGoogleAuth();
+    
+    // Susun array data sesuai urutan kolom di Sheet 'Rekapan Form'
+    // Sesuaikan ini dengan struktur formData dari frontend Anda
+    const values = [
+      [
+        formData.id || Date.now().toString(),
+        formData.tanggal || new Date().toISOString(),
+        formData.namaLengkap,
+        formData.kategori,
+        formData.status || 'Pending',
+        // ...tambahkan field lain sesuai urutan kolom Sheet Anda
+      ]
+    ];
+
+    const response = await sheets.spreadsheets.values.append({
+      auth,
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Rekapan Form!A:A',
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values },
+    });
+
+    res.json({ success: true, updatedRange: response.data.updates?.updatedRange });
+  } catch (error: any) {
+    console.error('Error appending form:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 3. GET: Ambil Data User (Read)
+app.get('/api/google/users', async (req, res) => {
+  try {
+    const auth = getGoogleAuth();
+    const response = await sheets.spreadsheets.values.get({
+      auth,
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Master Login!A2:E', 
+    });
+    
+    res.json({ success: true, data: response.data.values || [] });
+  } catch (error: any) {
+    console.error('Error fetching users:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 4. POST: Register User Baru (Write)
+app.post('/api/google/register-user', async (req, res) => {
+  try {
+    const { user } = req.body;
+    const auth = getGoogleAuth();
+    
+    const values = [
+      [user.id, user.name, user.email, user.role, user.password] // Sesuaikan urutan kolom
+    ];
+
+    await sheets.spreadsheets.values.append({
+      auth,
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Master Login!A:A',
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values },
+    });
+
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error registering user:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => console.log(`Server berjalan di http://localhost:${PORT}`));
