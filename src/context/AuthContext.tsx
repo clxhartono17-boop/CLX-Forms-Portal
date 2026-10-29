@@ -1,7 +1,7 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { User, UserRole, Division } from '../types/index.ts';
 import { MOCK_USERS } from '../utils/authConfig.ts';
-import { syncUserRegistrationToGoogleSheets } from '../utils/googleIntegration.ts';
+import { syncUserRegistrationToGoogleSheets, fetchUsersFromGoogleSheets } from '../utils/googleIntegration.ts';
 
 interface AuthContextType {
   currentUser: User;
@@ -40,17 +40,7 @@ const DEFAULT_USERS: User[] = [
 ];
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [registeredUsers, setRegisteredUsers] = useState<User[]>(() => {
-    try {
-      const saved = localStorage.getItem(REGISTERED_USERS_KEY);
-      if (saved) {
-        return JSON.parse(saved);
-      }
-    } catch (e) {
-      console.warn('Failed to parse registered users:', e);
-    }
-    return DEFAULT_USERS;
-  });
+  const [registeredUsers, setRegisteredUsers] = useState<User[]>([]);
 
   const [currentUser, setCurrentUser] = useState<User>(() => {
     try {
@@ -61,15 +51,65 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (e) {
       console.warn('Failed to parse active user:', e);
     }
-    return MOCK_USERS.Staff;
+    return MOCK_USERS.Staff; // Fallback jika belum login
   });
 
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(true);
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(true); // Sesuai default sebelumnya
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
 
+  // 1. Tarik Data User dari Google Sheets saat aplikasi dibuka
+  const loadUsersFromSheets = useCallback(async () => {
+    try {
+      const rawRows = await fetchUsersFromGoogleSheets();
+      
+      // Map row dari Sheet kembali ke tipe User
+      // Asumsi format array: [ID, Nama, Email, Role, Divisi, Telepon, Tanggal Registrasi, Status, Password]
+      const parsedUsers: User[] = rawRows.map((row: any) => ({
+        id: row[0] || `usr_${Math.random().toString(36).substring(2, 6)}`,
+        name: row[1] || 'Unknown',
+        email: row[2] || '',
+        role: (row[3] as UserRole) || 'Staff',
+        division: (row[4] as Division) || 'General',
+        phone: row[5] !== '-' ? row[5] : undefined,
+        registeredAt: row[6],
+        // Catatan: Jika ada logic password, bisa ditambahkan di row berikutnya sesuai urutan kolom Sheet
+      }));
+
+      // Gabungkan dengan MOCK_USERS agar akun testing tetap bisa login jika Sheet kosong
+      const combinedUsers = [...DEFAULT_USERS];
+      
+      parsedUsers.forEach(sheetUser => {
+        // Mencegah duplikasi jika email sama
+        const exists = combinedUsers.findIndex(u => u.email.toLowerCase() === sheetUser.email.toLowerCase());
+        if (exists >= 0) {
+          combinedUsers[exists] = sheetUser;
+        } else {
+          combinedUsers.push(sheetUser);
+        }
+      });
+
+      setRegisteredUsers(combinedUsers);
+    } catch (error) {
+      console.warn('Gagal fetch dari Google Sheets Master Login, menggunakan fallback:', error);
+      const saved = localStorage.getItem(REGISTERED_USERS_KEY);
+      if (saved) {
+        setRegisteredUsers(JSON.parse(saved));
+      } else {
+        setRegisteredUsers(DEFAULT_USERS);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    loadUsersFromSheets();
+  }, [loadUsersFromSheets]);
+
+  // 2. Simpan cadangan ke LocalStorage
   useEffect(() => {
     try {
-      localStorage.setItem(REGISTERED_USERS_KEY, JSON.stringify(registeredUsers));
+      if (registeredUsers.length > 0) {
+        localStorage.setItem(REGISTERED_USERS_KEY, JSON.stringify(registeredUsers));
+      }
     } catch (e) {
       console.warn('Failed to save registered users:', e);
     }
@@ -114,7 +154,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       registeredAt: new Date().toISOString(),
     };
 
-    // Append to registered users list (update if exists)
+    // Update di State lokal agar langsung bisa login
     setRegisteredUsers(prev => {
       const filtered = prev.filter(u => u.email.toLowerCase() !== newUser.email.toLowerCase());
       return [...filtered, newUser];
@@ -123,11 +163,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setCurrentUser(newUser);
     setIsLoggedIn(true);
 
-    // Sync to Google Sheets tab "Master Login"
+    // Sync ke Google Sheets tab "Master Login" secara REAL
     try {
       await syncUserRegistrationToGoogleSheets(newUser);
     } catch (err) {
-      console.warn('Google Sheets Master Login sync notice:', err);
+      console.warn('Google Sheets Master Login sync failed (saved locally):', err);
     }
 
     return {
