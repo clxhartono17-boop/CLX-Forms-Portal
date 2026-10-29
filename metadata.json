@@ -1,0 +1,6 @@
+{
+  "name": "CLX Internal Financial & Operational Forms System",
+  "description": "Enterprise financial and operational form management with auto-numbering, Terbilang, PDF generation & merging, digital approvals, and Google Sheets & Drive integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
