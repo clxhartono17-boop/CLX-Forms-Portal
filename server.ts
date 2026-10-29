@@ -91,19 +91,16 @@ app.get('/api/google/users', async (req, res) => {
 // 4. POST: Register User Baru (Write)
 app.post('/api/google/register-user', async (req, res) => {
   try {
-    const { user } = req.body;
+    // Kita tangkap 'row' yang dikirim dari googleIntegration.ts
+    const { row } = req.body; 
     const auth = getGoogleAuth();
     
-    const values = [
-      [user.id, user.name, user.email, user.role, user.password] // Sesuaikan urutan kolom
-    ];
-
     await sheets.spreadsheets.values.append({
       auth,
       spreadsheetId: SPREADSHEET_ID,
       range: 'Master Login!A:A',
       valueInputOption: 'USER_ENTERED',
-      requestBody: { values },
+      requestBody: { values: [row] }, // Gunakan array row dari frontend
     });
 
     res.json({ success: true });
@@ -112,6 +109,3 @@ app.post('/api/google/register-user', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
-
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`Server berjalan di http://localhost:${PORT}`));
