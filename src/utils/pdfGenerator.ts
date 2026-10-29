@@ -1,5 +1,6 @@
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { FormDocument } from '../types/index.ts';
+import { requiresCeoApproval } from './approvalRules.ts';
 
 /**
  * Format number into Indonesian Rupiah format (e.g., Rp 1.500.000)
@@ -557,8 +558,9 @@ export async function generateOfficialFormPdf(doc: FormDocument): Promise<PDFDoc
         color: rgb(0.4, 0.4, 0.4),
       });
     } else {
-      // Empty waiting placeholder
-      const waitText = '(Menunggu)';
+      // Empty waiting placeholder or Not Required if CEO and <= 10 Juta
+      const isCeoNotRequired = sb.role === 'CEO' && !requiresCeoApproval(doc.totalAmount);
+      const waitText = isCeoNotRequired ? 'N/A (<= 10 Jt)' : '(Menunggu)';
       const wtW = fontOblique.widthOfTextAtSize(waitText, 7);
       page.drawText(waitText, {
         x: boxX + (sigBoxW - wtW) / 2,

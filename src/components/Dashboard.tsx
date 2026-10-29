@@ -1,8 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { useForms } from '../context/FormContext.tsx';
+import { useAuth } from '../context/AuthContext.tsx';
 import { FormDocument, FormType, Division, ApprovalStatus } from '../types/index.ts';
 import { formatRupiah, generateOfficialFormPdf, generateMergedPdf, downloadPdf } from '../utils/pdfGenerator.ts';
 import { GOOGLE_SHEETS_TEMPLATE_URL, GOOGLE_DRIVE_PARENT_FOLDER_ID, SHEET_TAB_REKAPAN_FORM } from '../utils/googleIntegration.ts';
+import { syncAllFormsToGoogleSheets } from '../utils/googleWorkspace.ts';
 import { DashboardCharts } from './DashboardCharts.tsx';
 import { 
   Search, 
@@ -15,11 +17,12 @@ import {
   CheckCircle, 
   Clock, 
   AlertTriangle, 
-  ExternalLink,
-  PlusCircle,
-  FileSpreadsheet,
-  RotateCcw,
-  BarChart2
+  ExternalLink, 
+  PlusCircle, 
+  FileSpreadsheet, 
+  RotateCcw, 
+  BarChart2,
+  RefreshCw
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -29,6 +32,43 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }) => {
   const { forms, resetToDefault } = useForms();
+  const { isGoogleConnected, googleToken, connectGoogle } = useAuth();
+
+  const [isSyncingSheets, setIsSyncingSheets] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+
+  const handleSyncAll = async () => {
+    if (forms.length === 0) {
+      setSyncFeedback('Belum ada formulir untuk disinkronkan.');
+      setTimeout(() => setSyncFeedback(null), 3500);
+      return;
+    }
+
+    let token = googleToken;
+    if (!token) {
+      try {
+        token = await connectGoogle();
+      } catch (err: any) {
+        setSyncFeedback(err?.message || 'Gagal menghubungkan akun Google.');
+        setTimeout(() => setSyncFeedback(null), 4000);
+        return;
+      }
+    }
+
+    if (!token) return;
+
+    setIsSyncingSheets(true);
+    setSyncFeedback('Sedang menyinkronkan data ke sheet "Rekapan Form"...');
+    try {
+      const res = await syncAllFormsToGoogleSheets(forms, token);
+      setSyncFeedback(`Berhasil menyinkronkan ${res.success} formulir ke Google Sheet "Rekapan Form"!`);
+    } catch (err: any) {
+      setSyncFeedback(`Gagal sinkronisasi: ${err?.message || 'Periksa koneksi'}`);
+    } finally {
+      setIsSyncingSheets(false);
+      setTimeout(() => setSyncFeedback(null), 5000);
+    }
+  };
 
   // Filters State
   const [searchQuery, setSearchQuery] = useState('');
@@ -213,7 +253,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
             />
           </div>
 
-          <div className="flex items-center space-x-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={handleSyncAll}
+              disabled={isSyncingSheets}
+              title="Kirim semua data form ke tab Rekapan Form Google Spreadsheet"
+              className="inline-flex items-center space-x-1 px-3 py-2 text-xs font-bold text-emerald-800 bg-emerald-100/80 hover:bg-emerald-200 border border-emerald-300 rounded-lg transition shadow-2xs disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncingSheets ? 'animate-spin' : ''}`} />
+              <span>{isSyncingSheets ? 'Menyinkronkan...' : 'Sinkronkan ke Sheet'}</span>
+            </button>
+
             <button
               onClick={handleExportCsv}
               className="inline-flex items-center space-x-1 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
@@ -229,7 +279,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
               className="inline-flex items-center space-x-1 px-3 py-2 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition"
             >
               <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>Google Sheets (Rekapan Form)</span>
+              <span>Buka Google Sheets</span>
               <ExternalLink className="w-3 h-3 ml-0.5" />
             </a>
 
@@ -242,6 +292,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
             </button>
           </div>
         </div>
+
+        {syncFeedback && (
+          <div className="p-2.5 bg-blue-50 border border-blue-200 text-blue-900 text-xs rounded-lg flex items-center justify-between">
+            <span className="font-medium">{syncFeedback}</span>
+            <button
+              onClick={() => setSyncFeedback(null)}
+              className="text-blue-500 hover:text-blue-800 font-bold ml-2 text-xs"
+            >
+              &times;
+            </button>
+          </div>
+        )}
 
         {/* Date Period & Dropdown Filters Row */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-1 border-t border-slate-100">
@@ -368,8 +430,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
             <tbody className="divide-y divide-slate-100">
               {filteredForms.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="py-8 text-center text-slate-400 text-xs">
-                    Tidak ada formulir yang sesuai dengan filter atau periode yang dipilih.
+                  <td colSpan={10} className="py-12 text-center text-slate-500 text-xs">
+                    <div className="flex flex-col items-center justify-center space-y-2">
+                      <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
+                        <FileText className="w-5 h-5" />
+                      </div>
+                      <span className="font-bold text-slate-700">
+                        {forms.length === 0
+                          ? 'Belum ada formulir dibuat (Database Bersih / No Dummy Data)'
+                          : 'Tidak ada formulir yang sesuai dengan filter.'}
+                      </span>
+                      <p className="text-[11px] text-slate-400 max-w-sm">
+                        {forms.length === 0
+                          ? 'Seluruh data formulir akan otomatis tersimpan ke Google Sheet "Rekapan Form" dan file PDF tersimpan di Google Drive.'
+                          : 'Silakan sesuaikan filter pencarian atau tanggal untuk menampilkan data.'}
+                      </p>
+                      {forms.length === 0 && (
+                        <button
+                          onClick={onCreateNew}
+                          className="mt-2 inline-flex items-center space-x-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-semibold shadow-xs transition"
+                        >
+                          <PlusCircle className="w-3.5 h-3.5" />
+                          <span>Buat Formulir Baru Sekarang</span>
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ) : (

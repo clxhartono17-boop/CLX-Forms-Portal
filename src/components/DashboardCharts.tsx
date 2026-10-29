@@ -28,7 +28,8 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'division' | 'formType' | 'pipeline'>('division');
 
-  const totalValue = forms.reduce((sum, f) => sum + (f.totalAmount || 0), 0) || 1;
+  const actualTotalValue = forms.reduce((sum, f) => sum + (f.totalAmount || 0), 0);
+  const totalValue = actualTotalValue || 1;
   const totalCount = forms.length || 1;
 
   // 1. Division Data Breakdown
@@ -182,7 +183,7 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
         <div className="space-y-3 pt-1">
           <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex justify-between">
             <span>Alokasi Finansial Berdasarkan Divisi</span>
-            <span>Total: {formatRupiah(totalValue)}</span>
+            <span>Total: {formatRupiah(actualTotalValue)}</span>
           </div>
 
           <div className="space-y-3">

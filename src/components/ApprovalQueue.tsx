@@ -3,22 +3,23 @@ import { useAuth } from '../context/AuthContext.tsx';
 import { useForms } from '../context/FormContext.tsx';
 import { FormDocument, UserRole } from '../types/index.ts';
 import { formatRupiah, generateMergedPdf, downloadPdf } from '../utils/pdfGenerator.ts';
+import { requiresCeoApproval, CEO_APPROVAL_THRESHOLD } from '../utils/approvalRules.ts';
 import { PhysicalFormPreview } from './PhysicalFormPreview.tsx';
 import { 
   CheckCircle, 
   XCircle, 
   Clock, 
   Eye, 
-  Paperclip, 
   ShieldCheck, 
   Download, 
   AlertCircle,
-  ArrowRight,
-  UserCheck
+  Shield,
+  Layers,
+  Sparkles
 } from 'lucide-react';
 
 export const ApprovalQueue: React.FC = () => {
-  const { currentUser, currentRole, switchRole } = useAuth();
+  const { currentUser, currentRole, switchRegisteredUser, registeredUsers } = useAuth();
   const { forms, approveForm, rejectForm, getPendingApprovalsForRole } = useForms();
 
   const [activeTab, setActiveTab] = useState<'my_pending' | 'all_pending'>('my_pending');
@@ -26,43 +27,48 @@ export const ApprovalQueue: React.FC = () => {
   const [rejectingDocId, setRejectingDocId] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const isStaff = currentRole === 'Staff';
-  const myPendingList = getPendingApprovalsForRole(currentRole);
+  const myPendingList = currentRole ? getPendingApprovalsForRole(currentRole) : [];
   const allPendingList = forms.filter(f => f.status !== 'Fully Approved' && f.status !== 'Rejected');
 
   const displayedList = activeTab === 'my_pending' ? myPendingList : allPendingList;
 
   const handleApprove = async (doc: FormDocument) => {
+    setActionError(null);
+    if (!currentUser) return;
     try {
       await approveForm(doc.id, {
-        role: currentRole,
+        role: currentUser.role,
         name: currentUser.name,
         title: currentUser.title,
       });
-      setActionSuccess(`Dokumen ${doc.docNumber} berhasil disetujui & stempel digital dibubuhkan.`);
+      setActionSuccess(`Dokumen ${doc.docNumber} berhasil disetujui & stempel digital resmi dibubuhkan.`);
       setTimeout(() => setActionSuccess(null), 4000);
       if (selectedDocForPreview?.id === doc.id) {
         setSelectedDocForPreview(null);
       }
     } catch (err: any) {
-      console.error(err);
+      setActionError(err.message || 'Gagal menyetujui dokumen.');
+      setTimeout(() => setActionError(null), 5000);
     }
   };
 
   const handleConfirmReject = async (docId: string) => {
-    if (!rejectionReason.trim()) return;
+    setActionError(null);
+    if (!rejectionReason.trim() || !currentUser) return;
     try {
       await rejectForm(docId, rejectionReason, {
-        role: currentRole,
+        role: currentUser.role,
         name: currentUser.name,
       });
       setRejectingDocId(null);
       setRejectionReason('');
-      setActionSuccess('Pengajuan berhasil ditolak dan status diperbarui di Google Sheets.');
+      setActionSuccess('Pengajuan berhasil ditolak dan status diperbarui di Google Sheets "Rekapan Form".');
       setTimeout(() => setActionSuccess(null), 4000);
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setActionError(err.message || 'Gagal menolak dokumen.');
     }
   };
 
@@ -77,7 +83,7 @@ export const ApprovalQueue: React.FC = () => {
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
-      {/* Top Banner & Role Notification */}
+      {/* Top Banner & Active User Info */}
       <div className="bg-slate-900 text-white p-5 rounded-xl border border-slate-800 shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-2">
@@ -85,33 +91,32 @@ export const ApprovalQueue: React.FC = () => {
               C-Level Executive Approval Portal
             </span>
             <span className="text-xs text-slate-400">
-              Peran Aktif: <strong className="text-white">{currentUser.name} ({currentRole})</strong>
+              Akun Login: <strong className="text-white">{currentUser?.name || '-'} ({currentUser?.role || '-'})</strong>
             </span>
           </div>
           <h2 className="text-base font-bold text-white mt-1">
             Menu Persetujuan Dokumen & Pembubuhan Tanda Tangan Digital
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Persetujuan melampirkan stempel digital terverifikasi dan secara otomatis memperbarui status baris di Google Sheets.
+            Sesuai SOP CLX: Dokumen &le; Rp 10 Juta cukup disetujui s/d CFO. Nilai di atas Rp 10 Juta wajib otorisasi akhir CEO.
           </p>
         </div>
 
-        {/* Quick Switch Role Buttons for Testing */}
-        <div className="flex flex-wrap items-center gap-1.5 bg-slate-800 p-1.5 rounded-lg border border-slate-700">
-          <span className="text-[10px] uppercase font-bold text-slate-400 px-1">Uji Peran:</span>
-          {(['CSO', 'COO', 'CFO', 'CEO'] as UserRole[]).map(r => (
-            <button
-              key={r}
-              onClick={() => switchRole(r)}
-              className={`px-2.5 py-1 text-xs font-bold rounded transition ${
-                currentRole === r
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'bg-slate-900 text-slate-300 hover:bg-slate-700'
-              }`}
-            >
-              {r}
-            </button>
-          ))}
+        {/* Quick Switch between Registered Accounts from Master Login */}
+        <div className="flex items-center space-x-2 bg-slate-800 p-2 rounded-lg border border-slate-700 text-xs">
+          <Shield className="w-4 h-4 text-blue-400" />
+          <span className="text-slate-300 font-semibold hidden sm:inline">Ganti Akun:</span>
+          <select
+            value={currentUser?.id || ''}
+            onChange={e => switchRegisteredUser(e.target.value)}
+            className="bg-slate-900 text-blue-300 font-bold px-2 py-1 rounded border border-slate-700 focus:outline-none"
+          >
+            {registeredUsers.map(u => (
+              <option key={u.id} value={u.id}>
+                {u.name} ({u.role})
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -122,6 +127,13 @@ export const ApprovalQueue: React.FC = () => {
         </div>
       )}
 
+      {actionError && (
+        <div className="flex items-center space-x-2 bg-red-50 border border-red-200 text-red-800 text-xs px-4 py-3 rounded-lg">
+          <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+          <span>{actionError}</span>
+        </div>
+      )}
+
       {isStaff ? (
         <div className="bg-amber-50 border border-amber-200 p-6 rounded-xl text-center space-y-3">
           <AlertCircle className="w-8 h-8 text-amber-600 mx-auto" />
@@ -129,18 +141,20 @@ export const ApprovalQueue: React.FC = () => {
             Peran Anda saat ini adalah Staff (Maker)
           </h3>
           <p className="text-xs text-amber-700 max-w-lg mx-auto">
-            Menu "Pending Approvals" dikhususkan untuk Eksekutif C-Level (CSO, COO, CFO, CEO) untuk memverifikasi dan membubuhkan tanda tangan digital.
+            Menu "Pending Approvals" dikhususkan untuk akun eksekutif C-Level (CSO, COO, CFO, CEO) untuk memvalidasi dan membubuhkan stempel digital.
           </p>
-          <div className="pt-2 flex justify-center space-x-2">
-            {(['CSO', 'COO', 'CFO', 'CEO'] as UserRole[]).map(r => (
-              <button
-                key={r}
-                onClick={() => switchRole(r)}
-                className="px-3 py-1.5 bg-white border border-amber-300 hover:bg-amber-100 text-amber-900 text-xs font-bold rounded-lg transition"
-              >
-                Ganti ke peran {r}
-              </button>
-            ))}
+          <div className="pt-2 flex flex-wrap justify-center gap-2">
+            {registeredUsers
+              .filter(u => u.role !== 'Staff')
+              .map(u => (
+                <button
+                  key={u.id}
+                  onClick={() => switchRegisteredUser(u.id)}
+                  className="px-3 py-1.5 bg-white border border-amber-300 hover:bg-amber-100 text-amber-900 text-xs font-bold rounded-lg transition"
+                >
+                  Beralih ke akun {u.name} ({u.role})
+                </button>
+              ))}
           </div>
         </div>
       ) : (
@@ -167,7 +181,7 @@ export const ApprovalQueue: React.FC = () => {
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
-              <span>Semua Dokumen Dalam Proses ({allPendingList.length})</span>
+              <span>Semua Antrean Dokumen ({allPendingList.length})</span>
             </button>
           </div>
 
@@ -179,13 +193,14 @@ export const ApprovalQueue: React.FC = () => {
                 Tidak ada dokumen yang menunggu persetujuan
               </div>
               <p className="text-xs text-slate-500">
-                Semua pengajuan pada tahapan Anda telah diproses atau belum dialihkan ke peran Anda.
+                Semua pengajuan yang dialihkan ke peran {currentRole} telah selesai diproses.
               </p>
             </div>
           ) : (
             <div className="space-y-4">
               {displayedList.map(doc => {
                 const canCurrentRoleApprove = doc.currentAssigneeRole === currentRole;
+                const needsCeo = requiresCeoApproval(doc.totalAmount);
 
                 return (
                   <div
@@ -195,7 +210,7 @@ export const ApprovalQueue: React.FC = () => {
                     <div className="p-5">
                       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-100 pb-4">
                         <div>
-                          <div className="flex items-center space-x-2">
+                          <div className="flex flex-wrap items-center gap-2">
                             <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-blue-100 text-blue-900 border border-blue-200">
                               {doc.formType}
                             </span>
@@ -205,6 +220,17 @@ export const ApprovalQueue: React.FC = () => {
                             <span className="text-xs text-slate-400">|</span>
                             <span className="text-xs font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded">
                               Divisi: {doc.division}
+                            </span>
+
+                            {/* Limit Approval Badge */}
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                                needsCeo
+                                  ? 'bg-purple-50 text-purple-800 border-purple-200'
+                                  : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                              }`}
+                            >
+                              {needsCeo ? 'Nilai > 10 Jt (Wajib Otorisasi CEO)' : 'Nilai \u2264 10 Jt (Otorisasi Maks. s/d CFO)'}
                             </span>
                           </div>
                           <div className="text-xs text-slate-500 mt-1">
@@ -235,16 +261,21 @@ export const ApprovalQueue: React.FC = () => {
 
                       {/* Approval Pipeline Progression Visual */}
                       <div className="my-4 bg-slate-50 p-3 rounded-lg border border-slate-200">
-                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-2">
-                          Tahapan Persetujuan Eksekutif:
+                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-2 flex items-center justify-between">
+                          <span>Tahapan Persetujuan Eksekutif:</span>
+                          <span className="text-slate-400 font-normal">
+                            {needsCeo ? 'Alur 5 Tingkat (s/d CEO)' : 'Alur 4 Tingkat (s/d CFO Selesai)'}
+                          </span>
                         </div>
-                        <div className="grid grid-cols-5 gap-2 text-center text-[10px]">
+                        <div className={`grid ${needsCeo ? 'grid-cols-5' : 'grid-cols-4'} gap-2 text-center text-[10px]`}>
                           {[
                             { role: 'Maker', name: doc.requesterName, done: !!doc.signatures.maker },
                             { role: 'CSO', name: 'CSO Strategy', done: !!doc.signatures.cso },
                             { role: 'COO', name: 'COO Operation', done: !!doc.signatures.coo },
                             { role: 'CFO', name: 'CFO Finance', done: !!doc.signatures.cfo },
-                            { role: 'CEO', name: 'CEO Approval', done: !!doc.signatures.ceo },
+                            ...(needsCeo
+                              ? [{ role: 'CEO', name: 'CEO Approval', done: !!doc.signatures.ceo }]
+                              : []),
                           ].map((step, idx) => (
                             <div
                               key={idx}
@@ -300,7 +331,7 @@ export const ApprovalQueue: React.FC = () => {
                           </button>
                         </div>
 
-                        {canCurrentRoleApprove && (
+                        {canCurrentRoleApprove ? (
                           <div className="flex items-center space-x-2">
                             <button
                               onClick={() => setRejectingDocId(doc.id)}
@@ -315,13 +346,21 @@ export const ApprovalQueue: React.FC = () => {
                               className="inline-flex items-center space-x-1 px-4 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-xs transition"
                             >
                               <ShieldCheck className="w-3.5 h-3.5" />
-                              <span>Setujui & Bubuhkan Stempel ({currentRole})</span>
+                              <span>
+                                {currentRole === 'CFO' && !needsCeo
+                                  ? 'Setujui & Finalisasi Pencairan (CFO - Selesai)'
+                                  : `Setujui & Bubuhkan Stempel (${currentRole})`}
+                              </span>
                             </button>
+                          </div>
+                        ) : (
+                          <div className="text-xs text-slate-400 italic">
+                            Menunggu otorisasi peran <strong className="text-slate-600">{doc.currentAssigneeRole}</strong>
                           </div>
                         )}
                       </div>
 
-                      {/* Rejection Reason Modal/Box */}
+                      {/* Rejection Reason Form */}
                       {rejectingDocId === doc.id && (
                         <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg space-y-2">
                           <label className="block text-xs font-bold text-red-800">

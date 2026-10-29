@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FormDocument } from '../types/index.ts';
 import { formatRupiah, generateOfficialFormPdf, generateMergedPdf, downloadPdf } from '../utils/pdfGenerator.ts';
+import { requiresCeoApproval } from '../utils/approvalRules.ts';
 import { Printer, Download, ExternalLink, CheckCircle, FileText, Paperclip, Loader2 } from 'lucide-react';
 
 interface PhysicalFormPreviewProps {
@@ -302,6 +303,11 @@ export const PhysicalFormPreview: React.FC<PhysicalFormPreviewProps> = ({
                       <div className="text-[7px] text-slate-400 font-mono">
                         {box.stamp.digitalHash?.slice(0, 10)}
                       </div>
+                    </div>
+                  ) : box.role === 'CEO' && !requiresCeoApproval(doc.totalAmount) ? (
+                    <div className="border border-slate-200 bg-slate-50 text-slate-400 p-1 rounded text-center w-full">
+                      <div className="text-[8px] font-bold uppercase text-slate-500">Tidak Diperlukan</div>
+                      <div className="text-[7px] text-slate-400 font-mono mt-0.5">Nilai &le; 10 Juta</div>
                     </div>
                   ) : (
                     <div className="text-[10px] italic text-slate-300">

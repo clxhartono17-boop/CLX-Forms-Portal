@@ -1,11 +1,18 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, UserRole, Division } from '../types/index.ts';
-import { MOCK_USERS } from '../utils/authConfig.ts';
-import { syncUserRegistrationToGoogleSheets, fetchUsersFromGoogleSheets } from '../utils/googleIntegration.ts';
+import { syncUserRegistrationToGoogleSheets } from '../utils/googleIntegration.ts';
+import { 
+  initGoogleAuth, 
+  signInWithGoogle, 
+  signOutGoogle, 
+  appendUserToMasterLogin,
+  getGoogleAccessToken 
+} from '../utils/googleWorkspace.ts';
+import { User as FirebaseUser } from 'firebase/auth';
 
 interface AuthContextType {
   currentUser: User | null;
-  currentRole: UserRole;
+  currentRole: UserRole | null;
   registeredUsers: User[];
   isLoggedIn: boolean;
   registerUser: (userData: {
@@ -19,119 +26,170 @@ interface AuthContextType {
   }) => Promise<{ success: boolean; message: string; user: User }>;
   loginUser: (email: string, password?: string) => { success: boolean; message: string };
   logout: () => void;
-  switchRole: (role: UserRole) => void;
+  switchRegisteredUser: (userId: string) => void;
   isCLevel: boolean;
   canApprove: boolean;
   showAuthModal: boolean;
   setShowAuthModal: (show: boolean) => void;
+  authModalMode: 'login' | 'register';
+  setAuthModalMode: (mode: 'login' | 'register') => void;
+  // Google Workspace OAuth State
+  googleUser: FirebaseUser | null;
+  googleToken: string | null;
+  isGoogleConnected: boolean;
+  connectGoogle: () => Promise<string | null>;
+  disconnectGoogle: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const REGISTERED_USERS_KEY = 'clx_registered_users_v2';
-const ACTIVE_USER_KEY = 'clx_active_user_v2';
+const REGISTERED_USERS_KEY = 'clx_registered_users_v4';
+const ACTIVE_USER_KEY = 'clx_active_user_v4';
 
-const DEFAULT_USERS: User[] = [
-  MOCK_USERS.Staff,
-  MOCK_USERS.CSO,
-  MOCK_USERS.COO,
-  MOCK_USERS.CFO,
-  MOCK_USERS.CEO,
+// Pre-registered official C-Level approval officers in Master Login
+// Staff/Maker accounts MUST be registered by the user
+const INITIAL_OFFICERS: User[] = [
+  {
+    id: 'usr_dimas_cso',
+    name: 'Dimas Wicaksono, M.M.',
+    email: 'dimas.wicaksono@clx.co.id',
+    password: 'password123',
+    role: 'CSO',
+    division: 'General',
+    title: 'Chief Strategy Officer',
+    phone: '0811902123',
+    registeredAt: '2026-10-28T08:05:00Z',
+  },
+  {
+    id: 'usr_hendrik_coo',
+    name: 'Hendrik Pratama, S.T.',
+    email: 'hendrik.pratama@clx.co.id',
+    password: 'password123',
+    role: 'COO',
+    division: 'Operation',
+    title: 'Chief Operating Officer',
+    phone: '0812990011',
+    registeredAt: '2026-10-28T08:10:00Z',
+  },
+  {
+    id: 'usr_siti_cfo',
+    name: 'Siti Rahmawati, S.E., Ak., CA',
+    email: 'siti.rahmawati@clx.co.id',
+    password: 'password123',
+    role: 'CFO',
+    division: 'Finance',
+    title: 'Chief Financial Officer',
+    phone: '0813998822',
+    registeredAt: '2026-10-28T08:15:00Z',
+  },
+  {
+    id: 'usr_hartono_ceo',
+    name: 'Hartono Wijaya, M.B.A.',
+    email: 'hartono.wijaya@clx.co.id',
+    password: 'password123',
+    role: 'CEO',
+    division: 'General',
+    title: 'Chief Executive Officer',
+    phone: '0818001122',
+    registeredAt: '2026-10-28T08:20:00Z',
+  },
 ];
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [registeredUsers, setRegisteredUsers] = useState<User[]>([]);
+  const [registeredUsers, setRegisteredUsers] = useState<User[]>(() => {
+    try {
+      const saved = localStorage.getItem(REGISTERED_USERS_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to parse registered users:', e);
+    }
+    return INITIAL_OFFICERS;
+  });
 
+  // CRITICAL: Default to null! No unauthenticated user gets automatically logged in.
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
       const saved = localStorage.getItem(ACTIVE_USER_KEY);
       if (saved) {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.email) {
+          return parsed;
+        }
       }
     } catch (e) {
       console.warn('Failed to parse active user:', e);
     }
-    return null; // Pastikan kosong jika belum ada yang login
+    return null;
   });
 
-  // KUNCI UTAMA: Default harus false agar user tidak bisa tembus portal
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false); 
-  const [showAuthModal, setShowAuthModal] = useState<boolean>(true);
+  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
+  const [authModalMode, setAuthModalMode] = useState<'login' | 'register'>('register');
 
-  // 1. Tarik Data User dari Google Sheets saat aplikasi dibuka
-  const loadUsersFromSheets = useCallback(async () => {
-    try {
-      const rawRows = await fetchUsersFromGoogleSheets();
-      
-      const parsedUsers: User[] = rawRows.map((row: any) => ({
-        id: row[0] || `usr_${Math.random().toString(36).substring(2, 6)}`,
-        name: row[1] || 'Unknown',
-        email: row[2] || '',
-        role: (row[3] as UserRole) || 'Staff',
-        division: (row[4] as Division) || 'General',
-        phone: row[5] !== '-' ? row[5] : undefined,
-        registeredAt: row[6],
-      }));
+  // Google Workspace Auth State
+  const [googleUser, setGoogleUser] = useState<FirebaseUser | null>(null);
+  const [googleToken, setGoogleToken] = useState<string | null>(null);
 
-      const combinedUsers = [...DEFAULT_USERS];
-      
-      parsedUsers.forEach(sheetUser => {
-        const exists = combinedUsers.findIndex(u => u.email.toLowerCase() === sheetUser.email.toLowerCase());
-        if (exists >= 0) {
-          combinedUsers[exists] = sheetUser;
-        } else {
-          combinedUsers.push(sheetUser);
-        }
-      });
-
-      setRegisteredUsers(combinedUsers);
-    } catch (error) {
-      console.warn('Gagal fetch dari Google Sheets Master Login, menggunakan fallback:', error);
-      const saved = localStorage.getItem(REGISTERED_USERS_KEY);
-      if (saved) {
-        setRegisteredUsers(JSON.parse(saved));
-      } else {
-        setRegisteredUsers(DEFAULT_USERS);
+  useEffect(() => {
+    const unsubscribe = initGoogleAuth(
+      (user, token) => {
+        setGoogleUser(user);
+        setGoogleToken(token);
+      },
+      () => {
+        setGoogleUser(null);
+        setGoogleToken(null);
       }
-    }
+    );
+    return () => unsubscribe();
   }, []);
 
   useEffect(() => {
-    loadUsersFromSheets();
-  }, [loadUsersFromSheets]);
-
-  useEffect(() => {
     try {
-      if (registeredUsers.length > 0) {
-        localStorage.setItem(REGISTERED_USERS_KEY, JSON.stringify(registeredUsers));
-      }
+      localStorage.setItem(REGISTERED_USERS_KEY, JSON.stringify(registeredUsers));
     } catch (e) {
       console.warn('Failed to save registered users:', e);
     }
   }, [registeredUsers]);
 
-  // Cek local storage untuk mempertahankan sesi login jika di-refresh
   useEffect(() => {
-    if (currentUser) {
-      setIsLoggedIn(true);
-      setShowAuthModal(false);
-      try {
+    try {
+      if (currentUser) {
         localStorage.setItem(ACTIVE_USER_KEY, JSON.stringify(currentUser));
-      } catch (e) {
-        console.warn('Failed to save active user:', e);
+      } else {
+        localStorage.removeItem(ACTIVE_USER_KEY);
       }
-    } else {
-      setIsLoggedIn(false);
-      setShowAuthModal(true);
+    } catch (e) {
+      console.warn('Failed to save active user:', e);
     }
   }, [currentUser]);
 
-  const switchRole = (role: UserRole) => {
-    const existing = registeredUsers.find(u => u.role === role);
-    if (existing) {
-      setCurrentUser(existing);
-    } else if (MOCK_USERS[role]) {
-      setCurrentUser(MOCK_USERS[role]);
+  const connectGoogle = async (): Promise<string | null> => {
+    try {
+      const res = await signInWithGoogle();
+      setGoogleUser(res.user);
+      setGoogleToken(res.accessToken);
+      return res.accessToken;
+    } catch (err: any) {
+      console.error('Google Connect Error:', err);
+      throw err;
+    }
+  };
+
+  const disconnectGoogle = async () => {
+    await signOutGoogle();
+    setGoogleUser(null);
+    setGoogleToken(null);
+  };
+
+  const switchRegisteredUser = (userId: string) => {
+    const target = registeredUsers.find(u => u.id === userId);
+    if (target) {
+      setCurrentUser(target);
     }
   };
 
@@ -144,12 +202,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     phone?: string;
     title?: string;
   }): Promise<{ success: boolean; message: string; user: User }> => {
+    const cleanEmail = userData.email.trim().toLowerCase();
+    
+    // Check if email already registered
+    const existing = registeredUsers.find(u => u.email.toLowerCase() === cleanEmail);
+    if (existing) {
+      throw new Error(`Email ${cleanEmail} sudah terdaftar! Silakan langsung login menggunakan kata sandi Anda.`);
+    }
+
     const defaultTitle = userData.title || `${userData.role} (${userData.division})`;
     const newUser: User = {
       id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       name: userData.name.trim(),
-      email: userData.email.trim().toLowerCase(),
-      password: userData.password,
+      email: cleanEmail,
+      password: userData.password?.trim() || 'clx2026',
       role: userData.role,
       division: userData.division,
       phone: userData.phone || '-',
@@ -157,45 +223,74 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       registeredAt: new Date().toISOString(),
     };
 
-    setRegisteredUsers(prev => {
-      const filtered = prev.filter(u => u.email.toLowerCase() !== newUser.email.toLowerCase());
-      return [...filtered, newUser];
-    });
-
+    // Save to local registered list
+    setRegisteredUsers(prev => [...prev, newUser]);
     setCurrentUser(newUser);
 
+    // Sync to Google Sheet tab "Master Login"
+    let sheetsSyncSuccess = false;
+    const token = googleToken || getGoogleAccessToken();
+    if (token) {
+      sheetsSyncSuccess = await appendUserToMasterLogin(newUser, token);
+    }
+
+    // Always run backend sync fallback as well
     try {
       await syncUserRegistrationToGoogleSheets(newUser);
     } catch (err) {
-      console.warn('Google Sheets Master Login sync failed (saved locally):', err);
+      console.warn('Backend sync warning:', err);
     }
+
+    const syncStatusMsg = sheetsSyncSuccess
+      ? ' dan berhasil ditambahkan langsung ke Google Sheet "Master Login"!'
+      : ' dan tersimpan di database sistem CLX!';
 
     return {
       success: true,
-      message: `Akun ${newUser.name} berhasil didaftarkan dan disimpan ke Google Sheet "Master Login"!`,
+      message: `Akun ${newUser.name} (${newUser.email}) berhasil terdaftar${syncStatusMsg}`,
       user: newUser,
     };
   };
 
-  const loginUser = (email: string, _password?: string): { success: boolean; message: string } => {
-    const found = registeredUsers.find(u => u.email.toLowerCase() === email.trim().toLowerCase());
-    if (found) {
-      setCurrentUser(found);
-      return { success: true, message: `Selamat datang kembali, ${found.name}!` };
+  const loginUser = (email: string, password?: string): { success: boolean; message: string } => {
+    const cleanEmail = email.trim().toLowerCase();
+    
+    if (!cleanEmail) {
+      return { success: false, message: 'Harap masukkan alamat email perusahaan Anda.' };
     }
-    return { success: false, message: 'Email tidak ditemukan. Silakan registrasi terlebih dahulu.' };
+
+    // STRICT CHECK: User MUST exist in registered users
+    const found = registeredUsers.find(u => u.email.toLowerCase() === cleanEmail);
+    if (!found) {
+      return { 
+        success: false, 
+        message: `Email "${cleanEmail}" belum terdaftar di sistem CLX! Anda harus melakukan registrasi akun baru terlebih dahulu.` 
+      };
+    }
+
+    // STRICT CHECK: Validate password
+    if (found.password && found.password.trim()) {
+      if (!password || password.trim() !== found.password.trim()) {
+        return { 
+          success: false, 
+          message: 'Kata sandi tidak sesuai! Harap periksa kembali kata sandi Anda.' 
+        };
+      }
+    }
+
+    setCurrentUser(found);
+    return { success: true, message: `Selamat datang kembali, ${found.name}!` };
   };
 
   const logout = () => {
     setCurrentUser(null);
-    setIsLoggedIn(false);
-    setShowAuthModal(true);
-    localStorage.removeItem(ACTIVE_USER_KEY);
   };
 
-  const currentRole = currentUser?.role || 'Staff';
-  const isCLevel = ['CSO', 'COO', 'CFO', 'CEO'].includes(currentRole);
+  const isLoggedIn = currentUser !== null;
+  const currentRole = currentUser?.role || null;
+  const isCLevel = !!currentRole && ['CSO', 'COO', 'CFO', 'CEO'].includes(currentRole);
   const canApprove = isCLevel;
+  const isGoogleConnected = googleToken !== null || googleUser !== null;
 
   return (
     <AuthContext.Provider
@@ -207,11 +302,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         registerUser,
         loginUser,
         logout,
-        switchRole,
+        switchRegisteredUser,
         isCLevel,
         canApprove,
         showAuthModal,
         setShowAuthModal,
+        authModalMode,
+        setAuthModalMode,
+        googleUser,
+        googleToken,
+        isGoogleConnected,
+        connectGoogle,
+        disconnectGoogle,
       }}
     >
       {children}

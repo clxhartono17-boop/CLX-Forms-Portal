@@ -7,9 +7,15 @@ import {
   FileText, 
   CheckCircle2, 
   PlusCircle, 
+  Cloud, 
   Shield, 
-  UserPlus
+  Layers, 
+  UserCheck,
+  UserPlus,
+  LogOut,
+  LogIn
 } from 'lucide-react';
+import { GoogleConnectButton } from './GoogleConnectButton.tsx';
 
 interface NavbarProps {
   activeTab: 'dashboard' | 'create' | 'approvals' | 'settings';
@@ -18,10 +24,10 @@ interface NavbarProps {
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenRegister }) => {
-  const { currentUser, currentRole, switchRole, setShowAuthModal } = useAuth();
+  const { currentUser, currentRole, switchRegisteredUser, registeredUsers, logout, setShowAuthModal } = useAuth();
   const { pendingCountForUser } = useForms();
 
-  const myPendingCount = pendingCountForUser(currentRole);
+  const myPendingCount = currentRole ? pendingCountForUser(currentRole) : 0;
 
   return (
     <header className="bg-slate-900 border-b border-slate-800 text-white sticky top-0 z-40 shadow-md">
@@ -37,9 +43,8 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenR
                 <span className="font-bold text-base tracking-tight text-white">
                   PT. CONNECTIVITY LEADS EXCELLENCE
                 </span>
-                {/* Diubah dari PFB ke FPP */}
                 <span className="hidden sm:inline-block text-[11px] font-medium bg-blue-950 text-blue-300 border border-blue-800 px-2 py-0.5 rounded">
-                  FPU / FPP / FPPB Portal
+                  FPU / PFB / FPPB Portal
                 </span>
               </div>
               <p className="text-xs text-slate-400 hidden sm:block">
@@ -91,39 +96,86 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenR
                 </span>
               )}
             </button>
+
+            <button
+              onClick={() => setActiveTab('settings')}
+              className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                activeTab === 'settings'
+                  ? 'bg-blue-600 text-white'
+                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+            >
+              <Cloud className="w-4 h-4" />
+              <span className="hidden md:inline">Google Cloud & Vercel</span>
+              <span className="md:hidden">Setup</span>
+            </button>
           </nav>
 
-          {/* Quick RBAC Role Switcher & Registration */}
+          {/* User Account / Role & Registration */}
           <div className="flex items-center space-x-2 sm:space-x-3">
-            <button
-              onClick={() => onOpenRegister ? onOpenRegister() : setShowAuthModal(true)}
-              className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 text-xs font-bold text-blue-200 bg-blue-950/80 hover:bg-blue-900 border border-blue-800 rounded-lg transition"
-            >
-              <UserPlus className="w-3.5 h-3.5 text-blue-400" />
-              <span className="hidden sm:inline">Registrasi User</span>
-              <span className="sm:hidden">Daftar</span>
-            </button>
-
-            <div className="hidden xl:flex flex-col text-right">
-              <span className="text-xs font-semibold text-slate-200">{currentUser?.name || 'Guest'}</span>
-              <span className="text-[11px] text-slate-400">{currentUser?.title || '-'}</span>
+            {/* Google Workspace Connection Button */}
+            <div className="hidden sm:block">
+              <GoogleConnectButton compact={true} />
             </div>
 
-            <div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg p-1">
-              <Shield className="w-3.5 h-3.5 text-blue-400 ml-1.5 mr-1" />
-              <select
-                aria-label="Switch active role"
-                value={currentRole}
-                onChange={e => switchRole(e.target.value as UserRole)}
-                className="bg-transparent text-xs font-bold text-blue-300 focus:outline-none cursor-pointer pr-1"
-              >
-                {SYSTEM_ROLES.map(r => (
-                  <option key={r.role} value={r.role} className="bg-slate-900 text-white">
-                    {r.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {currentUser ? (
+              <>
+                <button
+                  onClick={() => onOpenRegister ? onOpenRegister() : setShowAuthModal(true)}
+                  className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 text-xs font-bold text-blue-200 bg-blue-950/80 hover:bg-blue-900 border border-blue-800 rounded-lg transition"
+                >
+                  <UserPlus className="w-3.5 h-3.5 text-blue-400" />
+                  <span className="hidden sm:inline">+ Daftar User</span>
+                </button>
+
+                <div className="hidden xl:flex flex-col text-right">
+                  <span className="text-xs font-semibold text-slate-200">{currentUser.name}</span>
+                  <span className="text-[11px] text-slate-400">{currentUser.title} ({currentUser.division})</span>
+                </div>
+
+                {/* Account Switcher - Only from Master Login registered accounts */}
+                <div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg p-1">
+                  <Shield className="w-3.5 h-3.5 text-blue-400 ml-1.5 mr-1" />
+                  <select
+                    aria-label="Akun terdaftar"
+                    value={currentUser.id}
+                    onChange={e => switchRegisteredUser(e.target.value)}
+                    className="bg-transparent text-xs font-bold text-blue-300 focus:outline-none cursor-pointer pr-1"
+                  >
+                    {registeredUsers.map(u => (
+                      <option key={u.id} value={u.id} className="bg-slate-900 text-white">
+                        {u.name} ({u.role})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  onClick={logout}
+                  title="Keluar dari akun"
+                  className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </>
+            ) : (
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => setShowAuthModal(true)}
+                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition shadow-xs"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  <span>Masuk / Login</span>
+                </button>
+                <button
+                  onClick={() => onOpenRegister ? onOpenRegister() : setShowAuthModal(true)}
+                  className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 text-xs font-bold text-blue-200 bg-blue-950/80 hover:bg-blue-900 border border-blue-800 rounded-lg transition"
+                >
+                  <UserPlus className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Daftar Akun</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>

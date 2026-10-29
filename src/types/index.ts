@@ -114,7 +114,7 @@ export interface FormDocument {
   googleSheets?: {
     synced: boolean;
     rowNumber?: number;
-    sheetName: FormType;
+    sheetName: string;
     syncedAt?: string;
   };
 

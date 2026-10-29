@@ -1,4 +1,4 @@
-import React, { useState, useId } from 'react';
+import React, { useState, useEffect, useId } from 'react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { useForms } from '../context/FormContext.tsx';
 import { FormType, Division, FormItem, FormAttachment, FormDocument } from '../types/index.ts';
@@ -14,7 +14,12 @@ import {
   Eye, 
   FileEdit, 
   AlertCircle,
-  Save
+  Save,
+  Building,
+  CreditCard,
+  Layers,
+  Lock,
+  UserCheck
 } from 'lucide-react';
 
 interface FormCreatorProps {
@@ -23,7 +28,7 @@ interface FormCreatorProps {
 }
 
 export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel }) => {
-  const { currentUser } = useAuth();
+  const { currentUser, setShowAuthModal } = useAuth();
   const { getNextSequence, addForm } = useForms();
   const fileInputId = useId();
 
@@ -33,25 +38,37 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
     return today.toISOString().split('T')[0];
   });
 
+  // Division dropdown strictly as specified:
+  // Project, Operation, Services, General, Finance
   const [division, setDivision] = useState<Division>(currentUser?.division || 'Finance');
   const [requesterName, setRequesterName] = useState(currentUser?.name || '');
-  const [requesterRole, setRequesterRole] = useState(currentUser?.title || '');
+  const [requesterRole, setRequesterRole] = useState(currentUser?.title || 'Staff (Maker)');
   const [purpose, setPurpose] = useState('');
   const [notes, setNotes] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'Bank Transfer' | 'Cash' | 'Giro / Cheque'>('Bank Transfer');
   const [bankName, setBankName] = useState('BCA (Bank Central Asia)');
-  const [bankAccountNo, setBankAccountNo] = useState('');
+  const [bankAccountNo, setBankAccountNo] = useState('8830192831');
   const [bankAccountName, setBankAccountName] = useState(currentUser?.name || '');
 
-  // Line items state (Diperbaiki dari syntax error sebelumnya)
+  // Keep state synchronized whenever currentUser changes
+  useEffect(() => {
+    if (currentUser) {
+      setRequesterName(currentUser.name);
+      setRequesterRole(currentUser.title || `${currentUser.role} (${currentUser.division})`);
+      setDivision(currentUser.division || 'Finance');
+      setBankAccountName(currentUser.name);
+    }
+  }, [currentUser]);
+
+  // Line items state
   const [items, setItems] = useState<FormItem[]>([
     {
       id: 'item-1',
-      description: '',
+      description: 'Biaya Port Handling & Forklift Pelabuhan Tanjung Priok',
       qty: 1,
       unit: 'Lot',
-      unitPrice: 0,
-      total: 0,
+      unitPrice: 1500000,
+      total: 1500000,
     },
   ]);
 
@@ -104,6 +121,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
     setItems(prev => prev.filter((_, i) => i !== index));
   };
 
+  // Handle Attachment Upload (PDF, PNG, JPG)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -133,6 +151,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
     setAttachments(prev => prev.filter(a => a.id !== attId));
   };
 
+  // Construct draft doc object for physical preview
   const currentDraftDoc: FormDocument = {
     id: 'draft-temp',
     docNumber: autoDocNumber,
@@ -142,7 +161,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
     division,
     requesterName,
     requesterRole,
-    requesterEmail: currentUser?.email || 'user@clx.co.id',
+    requesterEmail: currentUser?.email || 'staff@clx.co.id',
     purpose: purpose || '(Belum mengisi keperluan)',
     notes,
     paymentMethod,
@@ -197,6 +216,41 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
       setIsSubmitting(false);
     }
   };
+
+  if (!currentUser) {
+    return (
+      <div className="max-w-xl mx-auto my-12 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden p-8 text-center animate-in fade-in zoom-in-95">
+        <div className="w-16 h-16 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-200 shadow-xs">
+          <Lock className="w-8 h-8" />
+        </div>
+        <span className="inline-block px-3 py-1 bg-amber-100 text-amber-900 text-[11px] font-bold uppercase rounded-full mb-2">
+          Otentikasi Wajib Karyawan
+        </span>
+        <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight">
+          Silakan Login atau Registrasi Terlebih Dahulu
+        </h2>
+        <p className="text-xs text-slate-600 mt-2 leading-relaxed max-w-md mx-auto">
+          Sesuai SOP internal <strong>PT. Connectivity Leads eXcellence</strong>, sebelum membuat formulir pengajuan (FPU, PFB, FPPB), pengguna diwajibkan memiliki akun terdaftar di <em>Master Login</em> dan masuk ke sistem.
+        </p>
+
+        <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
+          <button
+            onClick={() => setShowAuthModal(true)}
+            className="w-full sm:w-auto px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm transition flex items-center justify-center space-x-1.5"
+          >
+            <UserCheck className="w-4 h-4" />
+            <span>Login / Daftar Akun Baru</span>
+          </button>
+          <button
+            onClick={onCancel}
+            className="w-full sm:w-auto px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition"
+          >
+            Kembali ke Dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -256,7 +310,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
         <PhysicalFormPreview doc={currentDraftDoc} />
       ) : (
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* 1. Form Type Selector (PFB Diubah menjadi FPP) */}
+          {/* 1. Form Type Selector */}
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
             <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
               1. Pilih Jenis Formulir (Form Type)
@@ -271,9 +325,9 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
                   color: 'border-blue-500 bg-blue-50/50 text-blue-900',
                 },
                 {
-                  type: 'FPP' as FormType, // Diubah dari PFB ke FPP
-                  title: 'FPP',
-                  subtitle: 'Form Permohonan Pembayaran',
+                  type: 'PFB' as FormType,
+                  title: 'PFB',
+                  subtitle: 'Permohonan Faktur Biaya',
                   desc: 'BBM Solar, Biaya Toll, Port Handling, Faktur Pajak',
                   color: 'border-indigo-500 bg-indigo-50/50 text-indigo-900',
                 },
@@ -315,6 +369,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
             </label>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* DIVISI / DIVISION Dropdown strictly as required */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Divisi / Division <span className="text-red-500">*</span>
@@ -334,6 +389,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
                 </div>
               </div>
 
+              {/* Document Date */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Tanggal Pengajuan <span className="text-red-500">*</span>
@@ -346,6 +402,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
                 />
               </div>
 
+              {/* Pemohon / Requester */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Nama Pemohon (Staff) <span className="text-red-500">*</span>
@@ -360,6 +417,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
               </div>
             </div>
 
+            {/* Purpose */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
                 Keperluan / Uraian Kegiatan Pengajuan <span className="text-red-500">*</span>
@@ -437,7 +495,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
             </div>
           </div>
 
-          {/* 4. Line Items Table */}
+          {/* 4. Line Items Table with Auto-Calculation & Terbilang */}
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
             <div className="flex items-center justify-between">
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
@@ -550,7 +608,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
             </div>
           </div>
 
-          {/* 5. Attachments Section */}
+          {/* 5. Attachments & Google Drive Merging Section */}
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
             <div className="flex items-center justify-between">
               <div>
@@ -558,7 +616,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
                   5. Lampiran Dokumen & Integrasi Google Drive
                 </label>
                 <p className="text-[11px] text-slate-500 mt-0.5">
-                  File pendukung (PDF, JPG, PNG) akan digabungkan otomatis ke dalam satu single PDF dan diupload ke Google Drive.
+                  File pendukung (PDF, JPG, PNG) akan digabungkan otomatis ke dalam satu single PDF via pdf-lib dan diupload ke Google Drive.
                 </p>
               </div>
 
@@ -567,6 +625,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
               </div>
             </div>
 
+            {/* Upload Box */}
             <div className="border-2 border-dashed border-slate-300 rounded-xl p-4 text-center hover:bg-slate-50 transition cursor-pointer relative">
               <input
                 id={fileInputId}
@@ -585,6 +644,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
               </p>
             </div>
 
+            {/* Attachments List */}
             {attachments.length > 0 && (
               <div className="space-y-2">
                 <div className="text-xs font-bold text-slate-700">

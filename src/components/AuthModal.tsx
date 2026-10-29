@@ -9,10 +9,13 @@ import {
   Lock, 
   Mail, 
   Phone, 
+  Building, 
+  Shield, 
   CheckCircle, 
-  AlertCircle,
-  ExternalLink,
-  X
+  AlertCircle, 
+  ExternalLink, 
+  X,
+  Sparkles
 } from 'lucide-react';
 
 interface AuthModalProps {
@@ -26,8 +29,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
   initialMode = 'register',
 }) => {
-  // 1. Tambahkan isLoggedIn dari context
-  const { registerUser, loginUser, isLoggedIn } = useAuth();
+  const { 
+    registerUser, 
+    loginUser, 
+    registeredUsers, 
+    isGoogleConnected, 
+    connectGoogle, 
+    googleUser 
+  } = useAuth();
 
   const [mode, setMode] = useState<'login' | 'register'>(initialMode);
   const [name, setName] = useState('');
@@ -36,9 +45,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [role, setRole] = useState<UserRole>('Staff');
   const [division, setDivision] = useState<Division>('Finance');
   const [phone, setPhone] = useState('');
-  const [signatureFile, setSignatureFile] = useState<File | null>(null); 
   const [feedback, setFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
 
   if (!isOpen) return null;
 
@@ -51,8 +60,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    if (!signatureFile) {
-      setFeedback({ message: 'Tanda tangan digital wajib diunggah.', type: 'error' });
+    if (!password.trim() || password.length < 4) {
+      setFeedback({ message: 'Kata sandi minimal 4 karakter.', type: 'error' });
       return;
     }
 
@@ -82,34 +91,42 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     e.preventDefault();
     setFeedback(null);
 
-    if (!email.trim()) {
-      setFeedback({ message: 'Harap masukkan email Anda.', type: 'error' });
+    const cleanEmail = email.trim();
+    if (!cleanEmail) {
+      setFeedback({ message: 'Harap masukkan alamat email Anda.', type: 'error' });
       return;
     }
 
-    const res = loginUser(email, password);
+    if (!password.trim()) {
+      setFeedback({ message: 'Harap masukkan kata sandi akun Anda.', type: 'error' });
+      return;
+    }
+
+    const res = loginUser(cleanEmail, password);
     if (res.success) {
       setFeedback({ message: res.message, type: 'success' });
       setTimeout(() => {
         onClose();
-      }, 1000);
+      }, 900);
     } else {
       setFeedback({ message: res.message, type: 'error' });
     }
   };
 
-  // Kunci layar belakang (mencegah user klik keluar modal jika belum login)
-  const handleBackdropClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget && isLoggedIn) {
-      onClose();
+  const handleConnectGoogleClick = async () => {
+    setIsConnectingGoogle(true);
+    try {
+      await connectGoogle();
+      setFeedback({ message: 'Akun Google berhasil dihubungkan ke Google Sheets & Drive!', type: 'success' });
+    } catch (err: any) {
+      setFeedback({ message: err?.message || 'Gagal menghubungkan Google Workspace.', type: 'error' });
+    } finally {
+      setIsConnectingGoogle(false);
     }
   };
 
   return (
-    <div 
-      className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
-      onClick={handleBackdropClick} // Memungkinkan tutup dengan klik luar HANYA jika sudah login
-    >
+    <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
       <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         {/* Modal Top Banner */}
         <div className="bg-slate-900 text-white p-5 flex items-center justify-between border-b border-slate-800">
@@ -126,23 +143,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </p>
             </div>
           </div>
-          
-          {/* 2. Sembunyikan Tombol X jika belum login */}
-          {isLoggedIn && (
-            <button
-              onClick={onClose}
-              className="p-1.5 text-slate-400 hover:text-white rounded-lg transition"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          )}
+          <button
+            onClick={onClose}
+            className="p-1.5 text-slate-400 hover:text-white rounded-lg transition"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
         {/* Notice: Synced with Google Sheets "Master Login" */}
         <div className="bg-blue-50 border-b border-blue-200 px-5 py-2.5 flex items-center justify-between text-xs text-blue-900">
           <div className="flex items-center space-x-1.5">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span>Tersimpan otomatis ke Google Sheet: <strong>"{SHEET_TAB_MASTER_LOGIN}"</strong></span>
+            <span>Tersinkronisasi ke Sheet: <strong>"{SHEET_TAB_MASTER_LOGIN}"</strong></span>
           </div>
           <a
             href={GOOGLE_SHEETS_TEMPLATE_URL}
@@ -153,6 +166,31 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <span>Buka Sheet</span>
             <ExternalLink className="w-3 h-3" />
           </a>
+        </div>
+
+        {/* Google Workspace Connection Banner */}
+        <div className="px-5 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between text-xs">
+          <div className="flex items-center space-x-2">
+            <div className={`w-2.5 h-2.5 rounded-full ${isGoogleConnected ? 'bg-emerald-500' : 'bg-amber-400'}`}></div>
+            <span className="font-medium text-slate-700">
+              {isGoogleConnected ? (
+                <span>Google Terhubung: <strong>{googleUser?.email}</strong></span>
+              ) : (
+                <span>Google Sheets: Belum terhubung</span>
+              )}
+            </span>
+          </div>
+
+          {!isGoogleConnected && (
+            <button
+              type="button"
+              onClick={handleConnectGoogleClick}
+              disabled={isConnectingGoogle}
+              className="inline-flex items-center space-x-1 px-2.5 py-1 text-[11px] font-bold text-blue-700 bg-white hover:bg-blue-50 border border-blue-200 rounded shadow-2xs transition"
+            >
+              <span>{isConnectingGoogle ? 'Menghubungkan...' : 'Hubungkan Google'}</span>
+            </button>
+          )}
         </div>
 
         {/* Tab Switcher */}
@@ -224,7 +262,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   required
                   value={name}
                   onChange={e => setName(e.target.value)}
-                  placeholder="Contoh: Christine Natalia"
+                  placeholder="Contoh: Christine Natalia / Budi Santoso"
                   className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:bg-white text-slate-800"
                 />
               </div>
@@ -274,8 +312,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:bg-white text-slate-800 font-bold"
                   >
                     <option value="Staff">Staff (Maker)</option>
-                    {/* 3. Ubah Strategy menjadi Service */}
-                    <option value="CSO">CSO (Chief Service Officer)</option>
+                    <option value="CSO">CSO (Chief Strategy Officer)</option>
                     <option value="COO">COO (Chief Operating Officer)</option>
                     <option value="CFO">CFO (Chief Financial Officer)</option>
                     <option value="CEO">CEO (Chief Executive Officer)</option>
@@ -286,15 +323,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Kata Sandi (Password)
+                    Kata Sandi (Password) <span className="text-red-500">*</span>
                   </label>
                   <div className="relative">
                     <Lock className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3" />
                     <input
                       type="password"
+                      required
+                      minLength={4}
                       value={password}
                       onChange={e => setPassword(e.target.value)}
-                      placeholder="••••••••"
+                      placeholder="Minimal 4 karakter"
                       className="w-full text-xs pl-8 pr-3 py-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:bg-white text-slate-800"
                     />
                   </div>
@@ -317,59 +356,49 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Upload Tanda Tangan (Digital Sign) <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="file"
-                  accept="image/png, image/jpeg"
-                  required
-                  onChange={e => setSignatureFile(e.target.files?.[0] || null)}
-                  className="w-full text-xs p-2 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:bg-white text-slate-800 
-                  file:mr-4 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200 cursor-pointer"
-                />
-                <p className="text-[10px] text-slate-500 mt-1.5">
-                  Format: PNG, JPG (Maks. 2MB). Disarankan menggunakan background transparan.
-                </p>
-              </div>
-
               <button
                 type="submit"
                 disabled={isSubmitting}
                 className="w-full mt-2 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm transition disabled:opacity-50 flex items-center justify-center space-x-1.5"
               >
                 <UserCheck className="w-4 h-4" />
-                <span>{isSubmitting ? 'Mendaftarkan ke Master Login...' : 'Daftar Sekarang & Sinkron ke Sheets'}</span>
+                <span>{isSubmitting ? 'Mendaftarkan ke Master Login...' : 'Daftar Sekarang & Simpan ke Sheets'}</span>
               </button>
             </form>
           ) : (
             <form onSubmit={handleLoginSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Email Perusahaan
+                  Email Perusahaan Terdaftar <span className="text-red-500">*</span>
                 </label>
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  placeholder="nama@clx.co.id"
-                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:bg-white text-slate-800"
-                />
+                <div className="relative">
+                  <Mail className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3" />
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    placeholder="nama@clx.co.id"
+                    className="w-full text-xs pl-8 pr-3 py-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:bg-white text-slate-800"
+                  />
+                </div>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Kata Sandi
+                  Kata Sandi <span className="text-red-500">*</span>
                 </label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:bg-white text-slate-800"
-                />
+                <div className="relative">
+                  <Lock className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3" />
+                  <input
+                    type="password"
+                    required
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    placeholder="Masukkan kata sandi akun Anda"
+                    className="w-full text-xs pl-8 pr-3 py-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:bg-white text-slate-800"
+                  />
+                </div>
               </div>
 
               <button
@@ -378,6 +407,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               >
                 Masuk ke Portal
               </button>
+
+              <div className="text-center pt-2">
+                <span className="text-xs text-slate-500">
+                  Belum memiliki akun terdaftar?{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('register');
+                      setFeedback(null);
+                    }}
+                    className="font-bold text-blue-600 hover:underline"
+                  >
+                    Daftar di sini
+                  </button>
+                </span>
+              </div>
             </form>
           )}
         </div>
