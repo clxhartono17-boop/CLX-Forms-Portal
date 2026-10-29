@@ -1,4 +1,4 @@
-export type FormType = 'FPU' | 'PFB' | 'FPPB';
+export type FormType = 'FPU' | 'FPP' | 'FPPB';
 
 export type Division = 'Project' | 'Operation' | 'Services' | 'General' | 'Finance';
 
@@ -85,7 +85,7 @@ export interface FormDocument {
 
   // Type-specific metadata
   fpuCategory?: 'Kas Bon' | 'Reimbursement' | 'Uang Muka Operasional' | 'Pembayaran Vendor';
-  pfbCategory?: 'Faktur Pajak' | 'Biaya Operasional' | 'Biaya Logistik & Freight' | 'Bahan Bakar & Tol';
+  fppCategory?: 'Faktur Pajak' | 'Biaya Operasional' | 'Biaya Logistik & Freight' | 'Bahan Bakar & Tol';
   fppbCategory?: 'Peralatan Kantor' | 'Sparepart & Hardware' | 'Asset Operasional' | 'Software & IT';
 
   // Approvals & Signatures
