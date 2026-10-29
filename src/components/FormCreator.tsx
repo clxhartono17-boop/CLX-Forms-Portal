@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useId } from 'react';
+import React, { useState, useId } from 'react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { useForms } from '../context/FormContext.tsx';
 import { FormType, Division, FormItem, FormAttachment, FormDocument } from '../types/index.ts';
@@ -14,10 +14,7 @@ import {
   Eye, 
   FileEdit, 
   AlertCircle,
-  Save,
-  Building,
-  CreditCard,
-  Layers
+  Save
 } from 'lucide-react';
 
 interface FormCreatorProps {
@@ -36,27 +33,25 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
     return today.toISOString().split('T')[0];
   });
 
-  // Division dropdown strictly as specified:
-  // Project, Operation, Services, General, Finance
-  const [division, setDivision] = useState<Division>(currentUser.division || '');
-  const [requesterName, setRequesterName] = useState(currentUser.name || '');
-  const [requesterRole, setRequesterRole] = useState(currentUser.title || '');
+  const [division, setDivision] = useState<Division>(currentUser?.division || 'Finance');
+  const [requesterName, setRequesterName] = useState(currentUser?.name || '');
+  const [requesterRole, setRequesterRole] = useState(currentUser?.title || '');
   const [purpose, setPurpose] = useState('');
   const [notes, setNotes] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'Bank Transfer' | 'Cash' | 'Giro / Cheque'>('Bank Transfer');
   const [bankName, setBankName] = useState('BCA (Bank Central Asia)');
   const [bankAccountNo, setBankAccountNo] = useState('');
-  const [bankAccountName, setBankAccountName] = useState(currentUser.name || '');
+  const [bankAccountName, setBankAccountName] = useState(currentUser?.name || '');
 
-  // Line items state
+  // Line items state (Diperbaiki dari syntax error sebelumnya)
   const [items, setItems] = useState<FormItem[]>([
     {
       id: 'item-1',
       description: '',
       qty: 1,
       unit: 'Lot',
-      unitPrice:,
-      total:,
+      unitPrice: 0,
+      total: 0,
     },
   ]);
 
@@ -109,7 +104,6 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
     setItems(prev => prev.filter((_, i) => i !== index));
   };
 
-  // Handle Attachment Upload (PDF, PNG, JPG)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -139,7 +133,6 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
     setAttachments(prev => prev.filter(a => a.id !== attId));
   };
 
-  // Construct draft doc object for physical preview
   const currentDraftDoc: FormDocument = {
     id: 'draft-temp',
     docNumber: autoDocNumber,
@@ -149,7 +142,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
     division,
     requesterName,
     requesterRole,
-    requesterEmail: currentUser.email,
+    requesterEmail: currentUser?.email || 'user@clx.co.id',
     purpose: purpose || '(Belum mengisi keperluan)',
     notes,
     paymentMethod,
@@ -263,7 +256,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
         <PhysicalFormPreview doc={currentDraftDoc} />
       ) : (
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* 1. Form Type Selector */}
+          {/* 1. Form Type Selector (PFB Diubah menjadi FPP) */}
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
             <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
               1. Pilih Jenis Formulir (Form Type)
@@ -278,7 +271,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
                   color: 'border-blue-500 bg-blue-50/50 text-blue-900',
                 },
                 {
-                  type: 'PFB' as FormType,
+                  type: 'FPP' as FormType, // Diubah dari PFB ke FPP
                   title: 'FPP',
                   subtitle: 'Form Permohonan Pembayaran',
                   desc: 'BBM Solar, Biaya Toll, Port Handling, Faktur Pajak',
@@ -322,7 +315,6 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
             </label>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* DIVISI / DIVISION Dropdown strictly as required */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Divisi / Division <span className="text-red-500">*</span>
@@ -342,7 +334,6 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
                 </div>
               </div>
 
-              {/* Document Date */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Tanggal Pengajuan <span className="text-red-500">*</span>
@@ -355,7 +346,6 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
                 />
               </div>
 
-              {/* Pemohon / Requester */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Nama Pemohon (Staff) <span className="text-red-500">*</span>
@@ -370,7 +360,6 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
               </div>
             </div>
 
-            {/* Purpose */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
                 Keperluan / Uraian Kegiatan Pengajuan <span className="text-red-500">*</span>
@@ -448,7 +437,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
             </div>
           </div>
 
-          {/* 4. Line Items Table with Auto-Calculation & Terbilang */}
+          {/* 4. Line Items Table */}
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
             <div className="flex items-center justify-between">
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
@@ -561,7 +550,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
             </div>
           </div>
 
-          {/* 5. Attachments & Google Drive Merging Section */}
+          {/* 5. Attachments Section */}
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
             <div className="flex items-center justify-between">
               <div>
@@ -569,7 +558,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
                   5. Lampiran Dokumen & Integrasi Google Drive
                 </label>
                 <p className="text-[11px] text-slate-500 mt-0.5">
-                  File pendukung (PDF, JPG, PNG) akan digabungkan otomatis ke dalam satu single PDF via pdf-lib dan diupload ke Google Drive.
+                  File pendukung (PDF, JPG, PNG) akan digabungkan otomatis ke dalam satu single PDF dan diupload ke Google Drive.
                 </p>
               </div>
 
@@ -578,7 +567,6 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
               </div>
             </div>
 
-            {/* Upload Box */}
             <div className="border-2 border-dashed border-slate-300 rounded-xl p-4 text-center hover:bg-slate-50 transition cursor-pointer relative">
               <input
                 id={fileInputId}
@@ -597,7 +585,6 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
               </p>
             </div>
 
-            {/* Attachments List */}
             {attachments.length > 0 && (
               <div className="space-y-2">
                 <div className="text-xs font-bold text-slate-700">
