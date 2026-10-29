@@ -52,28 +52,16 @@ app.get('/api/google/forms', async (req, res) => {
 // 2. POST: Simpan Form Baru (Write)
 app.post('/api/google/sheets-sync', async (req, res) => {
   try {
-    const { formData } = req.body;
+    // Kita tangkap 'row' yang dikirim dari googleIntegration.ts
+    const { row } = req.body; 
     const auth = getGoogleAuth();
-    
-    // Susun array data sesuai urutan kolom di Sheet 'Rekapan Form'
-    // Sesuaikan ini dengan struktur formData dari frontend Anda
-    const values = [
-      [
-        formData.id || Date.now().toString(),
-        formData.tanggal || new Date().toISOString(),
-        formData.namaLengkap,
-        formData.kategori,
-        formData.status || 'Pending',
-        // ...tambahkan field lain sesuai urutan kolom Sheet Anda
-      ]
-    ];
 
     const response = await sheets.spreadsheets.values.append({
       auth,
       spreadsheetId: SPREADSHEET_ID,
       range: 'Rekapan Form!A:A',
       valueInputOption: 'USER_ENTERED',
-      requestBody: { values },
+      requestBody: { values: [row] }, // Langsung gunakan array row dari frontend
     });
 
     res.json({ success: true, updatedRange: response.data.updates?.updatedRange });
