@@ -20,7 +20,7 @@ export const SYSTEM_ROLES: {
   },
   {
     role: 'CSO',
-    label: 'CSO (Chief Strategy Officer)',
+    label: 'CSO (Chief Services Officer)',
     badgeColor: 'bg-blue-100 text-blue-800 border-blue-300',
     description: 'Initial operational & strategic review (First level approval)',
     canCreateForms: true,
