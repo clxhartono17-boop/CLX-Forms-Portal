@@ -262,7 +262,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:bg-white text-slate-800 font-bold"
                   >
                     <option value="Staff">Staff (Maker)</option>
-                    <option value="CSO">CSO (Chief Strategy Officer)</option>
+                    <option value="CSO">CSO (Chief Services Officer)</option>
                     <option value="COO">COO (Chief Operating Officer)</option>
                     <option value="CFO">CFO (Chief Financial Officer)</option>
                     <option value="CEO">CEO (Chief Executive Officer)</option>
