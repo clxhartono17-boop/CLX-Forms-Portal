@@ -1,11 +1,13 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { FormDocument, FormType, UserRole, DigitalStamp } from '../types/index.ts';
-import { INITIAL_FORMS } from '../data/mockData.ts';
-import { syncToGoogleDrive, syncToGoogleSheets } from '../utils/googleIntegration.ts';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { FormDocument, FormType, UserRole, DigitalStamp } from '../types/index.ts'; // Sesuaikan ekstensi import Anda
+import { syncToGoogleDrive, syncToGoogleSheets, fetchFormsFromGoogleSheets } from '../utils/googleIntegration.ts';
 import { generateMergedPdf } from '../utils/pdfGenerator.ts';
+
+// Hapus import INITIAL_FORMS dari mockData.ts karena kita sudah tidak membutuhkannya
 
 interface FormContextType {
   forms: FormDocument[];
+  isLoading: boolean; // Tambahan state loading
   addForm: (doc: FormDocument) => Promise<FormDocument>;
   updateForm: (doc: FormDocument) => void;
   deleteForm: (id: string) => void;
@@ -16,6 +18,7 @@ interface FormContextType {
   pendingCountForUser: (role: UserRole) => number;
   syncDrive: (id: string) => Promise<void>;
   syncSheets: (id: string) => Promise<void>;
+  refreshForms: () => Promise<void>; // Fungsi untuk fetch ulang (refresh)
   resetToDefault: () => void;
 }
 
@@ -24,18 +27,102 @@ const FormContext = createContext<FormContextType | undefined>(undefined);
 const STORAGE_KEY = 'clx_financial_forms_v1';
 
 export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [forms, setForms] = useState<FormDocument[]>(() => {
+  const [forms, setForms] = useState<FormDocument[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  // Fungsi untuk memetakan status ke Assignee berikutnya
+  const getAssigneeFromStatus = (status: string): UserRole => {
+    switch (status) {
+      case 'Pending': return 'CSO';
+      case 'Approved by CSO': return 'COO';
+      case 'Approved by COO': return 'CFO';
+      case 'Approved by CFO': return 'CEO';
+      case 'Fully Approved': return 'CEO'; // Selesai
+      case 'Rejected': return 'Staff'; // Kembali ke pembuat
+      default: return 'CSO';
+    }
+  };
+
+  const loadFormsFromSheets = useCallback(async () => {
+    setIsLoading(true);
     try {
+      const rawRows = await fetchFormsFromGoogleSheets();
+      
+      // Map data array dari Sheets kembali ke format FormDocument React
+      const parsedForms: FormDocument[] = rawRows.map((row: any) => {
+        const parseSignature = (cell: string, role: UserRole): DigitalStamp | undefined => {
+          if (!cell || cell === '-') return undefined;
+          // Asumsi format di sheets: "Nama User (YYYY-MM-DD)"
+          const match = cell.match(/(.+?)\s*\((.+?)\)/);
+          if (match) {
+            return {
+              role,
+              userName: match[1].trim(),
+              userTitle: role,
+              signedAt: match[2],
+              digitalHash: 'Synced-From-Sheets',
+            };
+          }
+          return { role, userName: cell, userTitle: role, signedAt: '', digitalHash: '' };
+        };
+
+        // Ekstrak angka urutan dari "Nomor Dokumen" jika memungkinkan
+        const docNum: string = row[0] || '';
+        const seqMatch = docNum.match(/-(\d+)$/);
+        const sequenceNumber = seqMatch ? parseInt(seqMatch[1], 10) : 1;
+
+        const status = row[13] || 'Pending';
+
+        return {
+          id: row[0], // Gunakan nomor dokumen sebagai ID unik
+          docNumber: row[0],
+          sequenceNumber: sequenceNumber,
+          date: row[1],
+          formType: row[2] as FormType,
+          division: row[3],
+          requesterName: row[4],
+          requesterRole: row[5] as UserRole,
+          purpose: row[6],
+          totalAmount: Number(row[7]) || 0,
+          terbilang: row[8],
+          paymentMethod: row[9],
+          bankName: row[10] !== '-' ? row[10] : undefined,
+          bankAccountNo: row[11] !== '-' ? row[11] : undefined,
+          bankAccountName: row[12] !== '-' ? row[12] : undefined,
+          status: status as any,
+          currentAssigneeRole: getAssigneeFromStatus(status),
+          signatures: {
+            maker: parseSignature(row[14], 'Staff'),
+            cso: parseSignature(row[15], 'CSO'),
+            coo: parseSignature(row[16], 'COO'),
+            cfo: parseSignature(row[17], 'CFO'),
+            ceo: parseSignature(row[18], 'CEO'),
+          },
+          googleDrive: row[19] !== '-' ? { fileUrl: row[19], uploaded: true } as any : undefined,
+          notes: row[20] !== '-' ? row[20] : undefined,
+          updatedAt: row[21] || new Date().toISOString(),
+        };
+      });
+
+      // Data dari Sheets biasanya dari lama ke baru, kita reverse agar yang terbaru di atas
+      setForms(parsedForms.reverse());
+    } catch (e) {
+      console.warn('Gagal fetch dari Google Sheets, menggunakan fallback localStorage:', e);
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        return JSON.parse(saved);
+        setForms(JSON.parse(saved));
       }
-    } catch (e) {
-      console.warn('Failed to parse localStorage forms:', e);
+    } finally {
+      setIsLoading(false);
     }
-    return INITIAL_FORMS;
-  });
+  }, []);
 
+  // Jalankan saat aplikasi pertama kali dimuat
+  useEffect(() => {
+    loadFormsFromSheets();
+  }, [loadFormsFromSheets]);
+
+  // Simpan ke localstorage sebagai cache cadangan (jika offline)
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(forms));
@@ -52,8 +139,11 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const addForm = async (newDoc: FormDocument): Promise<FormDocument> => {
-    // Generate merged PDF & sync
     let updatedDoc = { ...newDoc };
+    
+    // Optimistic Update: Langsung tampil di UI sebelum selesai loading
+    setForms(prev => [updatedDoc, ...prev]);
+
     try {
       const pdfBytes = await generateMergedPdf(updatedDoc);
       const driveRes = await syncToGoogleDrive(updatedDoc, pdfBytes);
@@ -73,11 +163,13 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
         sheetName: sheetsRes.sheetName,
         syncedAt: sheetsRes.syncedAt,
       };
+
+      // Update state dengan data yang sudah dilengkapi link
+      updateForm(updatedDoc);
     } catch (err) {
-      console.warn('Auto-sync notice (simulated fallback applied):', err);
+      console.warn('Sync gagal (simpan lokal saja):', err);
     }
 
-    setForms(prev => [updatedDoc, ...prev]);
     return updatedDoc;
   };
 
@@ -134,14 +226,14 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updatedAt: new Date().toISOString(),
     };
 
-    // Update in state
+    // Update di React State
     updateForm(updatedDoc);
 
-    // Sync to Sheets
+    // Update ke Google Sheets
     try {
       await syncToGoogleSheets(updatedDoc);
     } catch (err) {
-      console.warn('Sheets update notice:', err);
+      console.warn('Gagal update form ke Google Sheets:', err);
     }
   };
 
@@ -156,6 +248,7 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const updatedDoc: FormDocument = {
       ...target,
       status: 'Rejected',
+      currentAssigneeRole: 'Staff',
       rejectionReason: reason,
       updatedAt: new Date().toISOString(),
     };
@@ -165,7 +258,7 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await syncToGoogleSheets(updatedDoc);
     } catch (err) {
-      console.warn('Sheets update notice:', err);
+      console.warn('Gagal update penolakan form ke Google Sheets:', err);
     }
   };
 
@@ -214,13 +307,14 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const resetToDefault = () => {
     localStorage.removeItem(STORAGE_KEY);
-    setForms(INITIAL_FORMS);
+    setForms([]);
   };
 
   return (
     <FormContext.Provider
       value={{
         forms,
+        isLoading, // Bisa dipakai di komponen untuk me-render spinner
         addForm,
         updateForm,
         deleteForm,
@@ -231,6 +325,7 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
         pendingCountForUser,
         syncDrive,
         syncSheets,
+        refreshForms: loadFormsFromSheets,
         resetToDefault,
       }}
     >
