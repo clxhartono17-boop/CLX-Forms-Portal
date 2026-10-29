@@ -9,13 +9,10 @@ import {
   Lock, 
   Mail, 
   Phone, 
-  Building, 
-  Shield, 
   CheckCircle, 
   AlertCircle,
   ExternalLink,
-  X,
-  Sparkles
+  X
 } from 'lucide-react';
 
 interface AuthModalProps {
@@ -29,7 +26,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
   initialMode = 'register',
 }) => {
-  const { registerUser, loginUser, registeredUsers } = useAuth();
+  const { registerUser, loginUser } = useAuth();
 
   const [mode, setMode] = useState<'login' | 'register'>(initialMode);
   const [name, setName] = useState('');
@@ -38,6 +35,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [role, setRole] = useState<UserRole>('Staff');
   const [division, setDivision] = useState<Division>('Finance');
   const [phone, setPhone] = useState('');
+  const [signatureFile, setSignatureFile] = useState<File | null>(null); // State untuk file tanda tangan
   const [feedback, setFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -52,8 +50,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
+    if (!signatureFile) {
+      setFeedback({ message: 'Tanda tangan digital wajib diunggah.', type: 'error' });
+      return;
+    }
+
     setIsSubmitting(true);
     try {
+      // Catatan: Jika ingin menyimpan file, Anda bisa memproses 'signatureFile' menjadi Base64 
+      // di sini atau meneruskannya ke fungsi registerUser untuk diupload ke Google Drive/Sheets.
+      
       const res = await registerUser({
         name,
         email,
@@ -92,11 +98,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     } else {
       setFeedback({ message: res.message, type: 'error' });
     }
-  };
-
-  const handleQuickSelect = (userEmail: string) => {
-    loginUser(userEmail);
-    onClose();
   };
 
   return (
@@ -303,6 +304,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
               </div>
 
+              {/* Tambahan Form Tanda Tangan Digital */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Upload Tanda Tangan (Digital Sign) <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="file"
+                  accept="image/png, image/jpeg"
+                  required
+                  onChange={e => setSignatureFile(e.target.files?.[0] || null)}
+                  className="w-full text-xs p-2 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:bg-white text-slate-800 
+                  file:mr-4 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200 cursor-pointer"
+                />
+                <p className="text-[10px] text-slate-500 mt-1.5">
+                  Format: PNG, JPG (Maks. 2MB). Disarankan menggunakan background transparan.
+                </p>
+              </div>
+
               <button
                 type="submit"
                 disabled={isSubmitting}
@@ -349,32 +368,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </button>
             </form>
           )}
-
-          {/* Quick Account Switcher Section */}
-          <div className="pt-3 border-t border-slate-200">
-            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center space-x-1">
-              <Sparkles className="w-3 h-3 text-amber-500" />
-              <span>Akses Cepat Pengguna Terdaftar:</span>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-36 overflow-y-auto">
-              {registeredUsers.slice(0, 6).map(u => (
-                <button
-                  type="button"
-                  key={u.id}
-                  onClick={() => handleQuickSelect(u.email)}
-                  className="p-1.5 bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-300 rounded-lg text-left transition flex items-center justify-between"
-                >
-                  <div className="truncate pr-1">
-                    <div className="text-[11px] font-bold text-slate-800 truncate">{u.name}</div>
-                    <div className="text-[9px] text-slate-400 truncate">{u.email}</div>
-                  </div>
-                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 shrink-0">
-                    {u.role}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
     </div>
