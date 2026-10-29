@@ -38,25 +38,25 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
 
   // Division dropdown strictly as specified:
   // Project, Operation, Services, General, Finance
-  const [division, setDivision] = useState<Division>(currentUser.division || 'Finance');
-  const [requesterName, setRequesterName] = useState(currentUser.name || 'Christine Natalia');
-  const [requesterRole, setRequesterRole] = useState(currentUser.title || 'Finance Staff');
+  const [division, setDivision] = useState<Division>(currentUser.division || '');
+  const [requesterName, setRequesterName] = useState(currentUser.name || '');
+  const [requesterRole, setRequesterRole] = useState(currentUser.title || '');
   const [purpose, setPurpose] = useState('');
   const [notes, setNotes] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'Bank Transfer' | 'Cash' | 'Giro / Cheque'>('Bank Transfer');
   const [bankName, setBankName] = useState('BCA (Bank Central Asia)');
-  const [bankAccountNo, setBankAccountNo] = useState('8830192831');
-  const [bankAccountName, setBankAccountName] = useState(currentUser.name || 'Christine Natalia');
+  const [bankAccountNo, setBankAccountNo] = useState('');
+  const [bankAccountName, setBankAccountName] = useState(currentUser.name || '');
 
   // Line items state
   const [items, setItems] = useState<FormItem[]>([
     {
       id: 'item-1',
-      description: 'Biaya Port Handling & Forklift Pelabuhan Tanjung Priok',
+      description: '',
       qty: 1,
       unit: 'Lot',
-      unitPrice: 1500000,
-      total: 1500000,
+      unitPrice:,
+      total:,
     },
   ]);
 
