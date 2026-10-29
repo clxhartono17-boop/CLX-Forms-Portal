@@ -7,10 +7,7 @@ import {
   FileText, 
   CheckCircle2, 
   PlusCircle, 
-  Cloud, 
   Shield, 
-  Layers, 
-  UserCheck,
   UserPlus
 } from 'lucide-react';
 
@@ -93,19 +90,6 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenR
                 </span>
               )}
             </button>
-
-            <button
-              onClick={() => setActiveTab('settings')}
-              className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                activeTab === 'settings'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-              }`}
-            >
-              <Cloud className="w-4 h-4" />
-              <span className="hidden md:inline">Google Cloud & Vercel</span>
-              <span className="md:hidden">Setup</span>
-            </button>
           </nav>
 
           {/* Quick RBAC Role Switcher & Registration */}
@@ -120,8 +104,8 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenR
             </button>
 
             <div className="hidden xl:flex flex-col text-right">
-              <span className="text-xs font-semibold text-slate-200">{currentUser.name}</span>
-              <span className="text-[11px] text-slate-400">{currentUser.title}</span>
+              <span className="text-xs font-semibold text-slate-200">{currentUser?.name || 'Guest'}</span>
+              <span className="text-[11px] text-slate-400">{currentUser?.title || '-'}</span>
             </div>
 
             <div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg p-1">
