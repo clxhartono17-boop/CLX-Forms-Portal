@@ -178,6 +178,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
         role: 'Staff',
         userName: requesterName,
         userTitle: requesterRole,
+        signatureImage: currentUser?.signatureUrl,
         signedAt: new Date().toISOString(),
         digitalHash: `SHA256-CLX-MKR-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
       },

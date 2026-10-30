@@ -43,6 +43,7 @@ export const ApprovalQueue: React.FC = () => {
         role: currentUser.role,
         name: currentUser.name,
         title: currentUser.title,
+        signatureUrl: currentUser.signatureUrl,
       });
       setActionSuccess(`Dokumen ${doc.docNumber} berhasil disetujui & stempel digital resmi dibubuhkan.`);
       setTimeout(() => setActionSuccess(null), 4000);

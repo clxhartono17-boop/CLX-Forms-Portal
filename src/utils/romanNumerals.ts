@@ -31,13 +31,15 @@ export function toRoman(num: number): string {
   return result;
 }
 
+import { FormType } from '../types/index.ts';
+
 /**
  * Generates official document number:
  * Format: [JENIS_FORM]-[4_DIGIT_URUTAN]/CLX/[DD]/[BULAN_ROMAWI]/[TAHUN_ROMAWI]
  * Example: FPU-0001/CLX/29/X/MMXXVI (for 29 October 2026)
  */
 export function generateDocNumber(
-  formType: 'FPU' | 'PFB' | 'FPPB',
+  formType: FormType,
   sequence: number,
   date: Date = new Date()
 ): string {

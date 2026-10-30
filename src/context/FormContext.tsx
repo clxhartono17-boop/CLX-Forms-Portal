@@ -12,7 +12,7 @@ interface FormContextType {
   updateForm: (doc: FormDocument) => void;
   deleteForm: (id: string) => void;
   getNextSequence: (type: FormType) => number;
-  approveForm: (id: string, user: { role: UserRole; name: string; title: string }) => Promise<void>;
+  approveForm: (id: string, user: { role: UserRole; name: string; title: string; signatureUrl?: string }) => Promise<void>;
   rejectForm: (id: string, reason: string, user: { role: UserRole; name: string }) => Promise<void>;
   getPendingApprovalsForRole: (role: UserRole) => FormDocument[];
   pendingCountForUser: (role: UserRole) => number;
@@ -58,21 +58,7 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let updatedDoc = { ...newDoc };
 
     try {
-      // 1. Generate merged PDF with all uploaded attachments
-      const pdfBytes = await generateMergedPdf(updatedDoc);
-
-      // 2. Upload to Google Drive nested folder
-      const driveRes = await syncToGoogleDrive(updatedDoc, pdfBytes);
-
-      updatedDoc.googleDrive = {
-        uploaded: true,
-        folderPath: driveRes.folderPath,
-        fileId: driveRes.fileId,
-        fileUrl: driveRes.webViewLink,
-        uploadedAt: driveRes.uploadedAt,
-      };
-
-      // 3. Automatically record to Google Sheet "Rekapan Form"
+      // 1. Automatically record to Google Sheet "Rekapan Form"
       const googleToken = getGoogleAccessToken();
       let sheetsSuccess = false;
       if (googleToken) {
@@ -88,7 +74,7 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
         syncedAt: new Date().toISOString(),
       };
     } catch (err) {
-      console.warn('Google sync notice:', err);
+      console.warn('Google sync notice on creation:', err);
     }
 
     setForms(prev => [updatedDoc, ...prev]);
@@ -105,7 +91,7 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const approveForm = async (
     id: string,
-    user: { role: UserRole; name: string; title: string }
+    user: { role: UserRole; name: string; title: string; signatureUrl?: string }
   ) => {
     const target = forms.find(f => f.id === id);
     if (!target) return;
@@ -124,6 +110,7 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
       role: user.role,
       userName: user.name,
       userTitle: user.title,
+      signatureImage: user.signatureUrl,
       signedAt: new Date().toISOString(),
       digitalHash: `SHA256-CLX-${user.role}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
     };
@@ -134,13 +121,30 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
     else if (user.role === 'CFO') updatedSignatures.cfo = stamp;
     else if (user.role === 'CEO') updatedSignatures.ceo = stamp;
 
-    const updatedDoc: FormDocument = {
+    let updatedDoc: FormDocument = {
       ...target,
       status: step.nextStatus,
       currentAssigneeRole: step.nextAssigneeRole,
       signatures: updatedSignatures,
       updatedAt: new Date().toISOString(),
     };
+
+    // Requirement: Yang tersimpan di Google Drive HANYA yang berstatus Full Approved
+    if (step.isFullyApproved) {
+      try {
+        const pdfBytes = await generateMergedPdf(updatedDoc);
+        const driveRes = await syncToGoogleDrive(updatedDoc, pdfBytes);
+        updatedDoc.googleDrive = {
+          uploaded: true,
+          folderPath: driveRes.folderPath,
+          fileId: driveRes.fileId,
+          fileUrl: driveRes.webViewLink,
+          uploadedAt: driveRes.uploadedAt,
+        };
+      } catch (driveErr) {
+        console.warn('Drive upload error on fully approved:', driveErr);
+      }
+    }
 
     // Update state
     updateForm(updatedDoc);

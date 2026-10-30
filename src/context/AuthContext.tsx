@@ -23,6 +23,7 @@ interface AuthContextType {
     division: Division;
     phone?: string;
     title?: string;
+    signatureUrl?: string;
   }) => Promise<{ success: boolean; message: string; user: User }>;
   loginUser: (email: string, password?: string) => { success: boolean; message: string };
   logout: () => void;
@@ -201,6 +202,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     division: Division;
     phone?: string;
     title?: string;
+    signatureUrl?: string;
   }): Promise<{ success: boolean; message: string; user: User }> => {
     const cleanEmail = userData.email.trim().toLowerCase();
     
@@ -221,6 +223,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       phone: userData.phone || '-',
       title: defaultTitle,
       registeredAt: new Date().toISOString(),
+      signatureUrl: userData.signatureUrl,
     };
 
     // Save to local registered list

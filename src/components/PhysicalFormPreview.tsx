@@ -290,10 +290,20 @@ export const PhysicalFormPreview: React.FC<PhysicalFormPreviewProps> = ({
                 <div className="my-auto py-1">
                   {box.stamp ? (
                     <div className="inline-block border border-emerald-600 bg-emerald-50 text-emerald-800 p-1 rounded text-center w-full shadow-xs">
-                      <div className="flex items-center justify-center space-x-1 text-[9px] font-black text-emerald-700">
-                        <CheckCircle className="w-2.5 h-2.5" />
-                        <span>DIGITALLY SIGNED</span>
-                      </div>
+                      {box.stamp.signatureImage ? (
+                        <div className="h-8 max-w-full my-0.5 flex items-center justify-center">
+                          <img 
+                            src={box.stamp.signatureImage} 
+                            alt={`Paraf ${box.stamp.userName}`} 
+                            className="max-h-full max-w-full object-contain mx-auto" 
+                          />
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center space-x-1 text-[9px] font-black text-emerald-700">
+                          <CheckCircle className="w-2.5 h-2.5" />
+                          <span>DIGITALLY SIGNED</span>
+                        </div>
+                      )}
                       <div className="text-[9px] font-bold text-slate-900 truncate">
                         {box.stamp.userName}
                       </div>

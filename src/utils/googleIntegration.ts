@@ -12,9 +12,8 @@ export const GOOGLE_SHEETS_TEMPLATE_URL = `https://docs.google.com/spreadsheets/
 export const SHEET_TAB_REKAPAN_FORM = 'Rekapan Form';
 export const SHEET_TAB_MASTER_LOGIN = 'Master Login';
 
-// Base URL Backend. Jika frontend dan backend pisah port (misal React 5173, Express 3001), gunakan ini:
-// Jika menggunakan Next.js API Routes, biarkan value-nya string kosong '' atau '/api/google'.
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001/api/google';
+// Unified internal API URL on port 3000
+const API_BASE_URL = '/api/google';
 
 export interface GoogleDriveUploadResult {
   fileId: string;

@@ -1,4 +1,4 @@
-export type FormType = 'FPU' | 'FPP' | 'FPPB';
+export type FormType = 'FPU' | 'FPP' | 'PFB' | 'FPPB';
 
 export type Division = 'Project' | 'Operation' | 'Services' | 'General' | 'Finance';
 
@@ -41,6 +41,7 @@ export interface DigitalStamp {
   userTitle: string;
   signedAt: string;
   signatureText?: string;
+  signatureImage?: string;
   digitalHash: string;
 }
 

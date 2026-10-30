@@ -15,7 +15,10 @@ import {
   AlertCircle, 
   ExternalLink, 
   X,
-  Sparkles
+  Sparkles,
+  PenTool,
+  Upload,
+  Image as ImageIcon
 } from 'lucide-react';
 
 interface AuthModalProps {
@@ -45,11 +48,34 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [role, setRole] = useState<UserRole>('Staff');
   const [division, setDivision] = useState<Division>('Finance');
   const [phone, setPhone] = useState('');
+  const [signatureUrl, setSignatureUrl] = useState<string>('');
   const [feedback, setFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
 
   if (!isOpen) return null;
+
+  const handleSignatureUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setFeedback({ message: 'Harap upload file gambar (PNG / JPG / JPEG) untuk tanda tangan.', type: 'error' });
+      return;
+    }
+
+    // Limit size to max 2MB
+    if (file.size > 2 * 1024 * 1024) {
+      setFeedback({ message: 'Ukuran file tanda tangan maksimal 2MB.', type: 'error' });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = ev => {
+      setSignatureUrl(ev.target?.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
 
   const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,6 +100,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         role,
         division,
         phone,
+        signatureUrl: signatureUrl || undefined,
       });
 
       setFeedback({ message: res.message, type: 'success' });
@@ -354,6 +381,61 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     />
                   </div>
                 </div>
+              </div>
+
+              {/* Digital Signature / Paraf Upload */}
+              <div className="border border-blue-200 bg-blue-50/50 rounded-xl p-3.5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-blue-950 flex items-center space-x-1.5">
+                    <PenTool className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Upload Tanda Tangan Digital / Signdigital</span>
+                  </label>
+                  <span className="text-[10px] text-blue-700 bg-blue-100 font-semibold px-2 py-0.5 rounded">
+                    Paraf Dokumen
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-600 leading-tight">
+                  Upload file gambar (PNG transparan atau JPG) untuk membubuhi paraf / tanda tangan pada matriks persetujuan formulir.
+                </p>
+
+                {signatureUrl ? (
+                  <div className="flex items-center justify-between bg-white border border-slate-200 rounded-lg p-2.5">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-16 h-10 border border-slate-200 rounded bg-slate-50 flex items-center justify-center p-1 overflow-hidden">
+                        <img 
+                          src={signatureUrl} 
+                          alt="Tanda Tangan Digital" 
+                          className="max-h-full max-w-full object-contain" 
+                        />
+                      </div>
+                      <div className="text-[11px]">
+                        <span className="font-semibold text-emerald-700 flex items-center space-x-1">
+                          <CheckCircle className="w-3 h-3 inline mr-1" />
+                          Signdigital siap digunakan
+                        </span>
+                        <p className="text-slate-400 text-[10px]">Tersimpan bersama profil akun</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSignatureUrl('')}
+                      className="text-xs text-red-600 hover:text-red-700 hover:underline font-medium px-2 py-1"
+                    >
+                      Hapus / Ganti
+                    </button>
+                  </div>
+                ) : (
+                  <label className="flex items-center justify-center space-x-2 border-2 border-dashed border-blue-300 hover:border-blue-500 bg-white rounded-lg p-3 cursor-pointer transition text-blue-700 hover:bg-blue-50/50">
+                    <Upload className="w-4 h-4 text-blue-600" />
+                    <span className="text-xs font-semibold">Pilih File Tanda Tangan (PNG / JPG)</span>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/jpg"
+                      onChange={handleSignatureUpload}
+                      className="hidden"
+                    />
+                  </label>
+                )}
               </div>
 
               <button
