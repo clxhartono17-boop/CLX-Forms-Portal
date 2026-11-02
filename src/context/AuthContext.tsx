@@ -243,9 +243,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Sync to Google Sheet tab "Master Login"
     let sheetsSyncSuccess = false;
+    let masterTabName = 'Master Login';
     const token = googleToken || getGoogleAccessToken();
     if (token) {
-      sheetsSyncSuccess = await appendUserToMasterLogin(newUser, token);
+      const res = await appendUserToMasterLogin(newUser, token);
+      sheetsSyncSuccess = res.success;
+      if (res.sheetTitle) masterTabName = res.sheetTitle;
     }
 
     // Always run backend sync fallback as well
@@ -256,7 +259,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     const syncStatusMsg = sheetsSyncSuccess
-      ? ' dan berhasil ditambahkan langsung ke Google Sheet "Master Login"!'
+      ? ` dan berhasil ditambahkan langsung ke tab "${masterTabName}" Google Sheet!`
       : ' dan tersimpan di database sistem CLX!';
 
     return {

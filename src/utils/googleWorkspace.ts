@@ -16,7 +16,9 @@ export const auth = getAuth(app);
 
 export const SPREADSHEET_ID = '1irb4RR0LMMBqRfGP4gxvX82c0nLfWIXKHzQ_tqC3h8c';
 export const DRIVE_PARENT_FOLDER_ID = '1hgUyTqNsfJsC30pY7O2kPS95DqEEySm9';
-export const TAB_REKAPAN_FORM = 'Rekapan Form';
+export const SPREADSHEET_URL = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/edit?gid=0#gid=0`;
+
+export const TAB_REKAPAN_FORM = 'Rekap Form CLX';
 export const TAB_MASTER_LOGIN = 'Master Login';
 
 const provider = new GoogleAuthProvider();
@@ -79,11 +81,8 @@ export const signOutGoogle = async () => {
 };
 
 /**
- * Format form record into the exact columns of "Rekapan Form"
- * Matches the user-provided master template:
- * [No, Jenis Form, No. Formulir, Tgl Pengajuan, Tgl Dibutuhkan, Divisi / Dept, Pemohon,
- *  Keperluan, Nominal DPP, Pajak, Total Nilai, Metode Bayar, Bank & Rekening,
- *  Estimasi Selesai, Level Otorisasi, Status Otorisasi, Status Kas Bon, Catatan, Link Dokumen]
+ * Format form record into the exact 19 columns of Row 8 in user's sheet:
+ * Row 8: No | Jenis Form | No. Formulir | Tgl Pengajuan | Tgl Dibutuhkan | Divisi / Dept | Pemohon (Requestor) | Keperluan / Perincian Pengeluaran | Nominal DPP (Rp) | Pajak / PPN / PPh | Total Nilai (Rp) | Metode Pembayaran | Nama Bank & No. Rekening Penerima | Estimasi Selesai (Kas Bon) | Level Otorisasi Diperlukan | Status Otorisasi | Status Kas Bon | Catatan / Keterangan | Link Dokumen / Lampiran
  */
 export function formatFormRow(doc: FormDocument, rowIndex: number): any[] {
   const bankInfo = doc.bankName 
@@ -98,147 +97,220 @@ export function formatFormRow(doc: FormDocument, rowIndex: number): any[] {
     ? (doc.status === 'Fully Approved' ? 'Menunggu SPJ / Realisasi' : 'Pengajuan Kas Bon')
     : '-';
 
-  const linkDokumen = doc.googleDrive?.fileUrl || doc.googleDrive?.folderPath || 'Tersimpan di Drive CLX';
+  const linkDokumen = doc.googleDrive?.fileUrl || doc.googleDrive?.folderPath || 'Tersimpan di Sistem CLX';
 
   return [
-    rowIndex,                                      // No
-    doc.formType,                                  // Jenis Form (FPU / PFB / FPPB)
-    doc.docNumber,                                 // No. Formulir
-    doc.date,                                      // Tgl Pengajuan
-    doc.date,                                      // Tgl Dibutuhkan
-    doc.division,                                  // Divisi / Dept
-    doc.requesterName,                             // Pemohon (Requestor)
-    doc.purpose,                                   // Keperluan / Perincian Pengeluaran
-    doc.totalAmount,                               // Nominal DPP (Rp)
-    0,                                             // Pajak / PPN / PPh
-    doc.totalAmount,                               // Total Nilai (Rp)
-    doc.paymentMethod,                             // Metode Pembayaran
-    bankInfo,                                      // Nama Bank & No. Rekening Penerima
-    doc.formType === 'FPU' ? 'H+7 Setelah Realisasi' : '-', // Estimasi Selesai (Kas Bon)
-    levelOtorisasi,                                // Level Otorisasi Diperlukan
-    doc.status,                                    // Status Otorisasi
-    statusKasBon,                                  // Status Kas Bon
-    doc.notes || 'Pengajuan melalui Portal Sistem CLX', // Catatan / Keterangan
-    linkDokumen,                                   // Link Dokumen / Lampiran
+    rowIndex,                                      // Col A: No
+    doc.formType,                                  // Col B: Jenis Form (FPU / FPP / FPPB)
+    doc.docNumber,                                 // Col C: No. Formulir
+    doc.date,                                      // Col D: Tgl Pengajuan
+    doc.date,                                      // Col E: Tgl Dibutuhkan
+    doc.division,                                  // Col F: Divisi / Dept
+    doc.requesterName,                             // Col G: Pemohon (Requestor)
+    doc.purpose,                                   // Col H: Keperluan / Perincian Pengeluaran
+    doc.totalAmount,                               // Col I: Nominal DPP (Rp)
+    0,                                             // Col J: Pajak / PPN / PPh
+    doc.totalAmount,                               // Col K: Total Nilai (Rp)
+    doc.paymentMethod,                             // Col L: Metode Pembayaran
+    bankInfo,                                      // Col M: Nama Bank & No. Rekening Penerima
+    doc.formType === 'FPU' ? 'H+7 Setelah Realisasi' : '-', // Col N: Estimasi Selesai (Kas Bon)
+    levelOtorisasi,                                // Col O: Level Otorisasi Diperlukan
+    doc.status,                                    // Col P: Status Otorisasi
+    statusKasBon,                                  // Col Q: Status Kas Bon
+    doc.notes || 'Pengajuan melalui Portal Sistem CLX', // Col R: Catatan / Keterangan
+    linkDokumen,                                   // Col S: Link Dokumen / Lampiran
   ];
 }
 
 /**
- * Ensure a sheet tab exists in the spreadsheet
+ * Dynamically identify the exact tab title for forms (the sheet corresponding to gid=0)
  */
-async function ensureSheetTabExists(sheetTitle: string, token: string): Promise<void> {
+export async function getTargetFormsTabTitle(token: string): Promise<string> {
   try {
-    const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}?fields=sheets.properties`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!metaRes.ok) return;
+    const metaRes = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}?fields=sheets.properties`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!metaRes.ok) return TAB_REKAPAN_FORM;
     const meta = await metaRes.json();
-    const exists = meta.sheets?.some((s: any) => s.properties?.title?.toLowerCase() === sheetTitle.toLowerCase());
-    
-    if (!exists) {
-      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}:batchUpdate`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          requests: [
-            {
-              addSheet: {
-                properties: { title: sheetTitle },
-              },
-            },
-          ],
-        }),
-      });
+    const sheets = meta.sheets || [];
+    if (sheets.length === 0) return TAB_REKAPAN_FORM;
+
+    // 1. Exact match for gid=0 (the primary sheet shown in the user's attachment)
+    const gid0Sheet = sheets.find((s: any) => s.properties?.sheetId === 0);
+    if (gid0Sheet?.properties?.title) {
+      return gid0Sheet.properties.title;
     }
+
+    // 2. Sheet containing "rekap" or "form"
+    const matchSheet = sheets.find((s: any) => {
+      const title = (s.properties?.title || '').toLowerCase();
+      return title.includes('rekap') || title.includes('form');
+    });
+    if (matchSheet?.properties?.title) {
+      return matchSheet.properties.title;
+    }
+
+    // 3. Fallback to first sheet
+    return sheets[0]?.properties?.title || TAB_REKAPAN_FORM;
   } catch (err) {
-    console.warn('ensureSheetTabExists notice:', err);
+    console.warn('getTargetFormsTabTitle warning:', err);
+    return TAB_REKAPAN_FORM;
   }
 }
 
 /**
- * Append form to Google Sheet "Rekapan Form"
+ * Dynamically identify or create the tab title for Master Login
  */
-export async function appendFormToGoogleSheets(doc: FormDocument, token: string): Promise<boolean> {
+export async function getTargetMasterLoginTabTitle(token: string): Promise<string> {
   try {
-    await ensureSheetTabExists(TAB_REKAPAN_FORM, token);
+    const metaRes = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}?fields=sheets.properties`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!metaRes.ok) return TAB_MASTER_LOGIN;
+    const meta = await metaRes.json();
+    const sheets = meta.sheets || [];
 
-    // Get current row count to calculate No urut
-    let currentCount = 1;
-    try {
-      const getRes = await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/'${TAB_REKAPAN_FORM}'!B9:B1000`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (getRes.ok) {
-        const getData = await getRes.json();
-        if (getData.values && Array.isArray(getData.values)) {
-          currentCount = getData.values.length + 1;
-        }
-      }
-    } catch {
-      // fallback
+    // Find tab matching "master" or "login" or "user"
+    const userSheet = sheets.find((s: any) => {
+      const title = (s.properties?.title || '').toLowerCase();
+      return title.includes('master') || title.includes('login') || title.includes('user');
+    });
+    if (userSheet?.properties?.title) {
+      return userSheet.properties.title;
     }
 
-    const row = formatFormRow(doc, currentCount);
-
-    // Append to table starting at column B (matching Row 8 table header in user's sheet)
-    const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/'${TAB_REKAPAN_FORM}'!B9:T:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
-    
-    const res = await fetch(appendUrl, {
+    // If not found, create new tab "Master Login"
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}:batchUpdate`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        values: [row],
+        requests: [
+          {
+            addSheet: {
+              properties: { title: TAB_MASTER_LOGIN },
+            },
+          },
+        ],
       }),
     });
-
-    if (!res.ok) {
-      const errText = await res.text();
-      console.error('Google Sheets append error:', res.status, errText);
-      return false;
-    }
-
-    return true;
-  } catch (error) {
-    console.error('appendFormToGoogleSheets failed:', error);
-    return false;
+    return TAB_MASTER_LOGIN;
+  } catch (err) {
+    console.warn('getTargetMasterLoginTabTitle warning:', err);
+    return TAB_MASTER_LOGIN;
   }
 }
 
+export interface AppendFormResult {
+  success: boolean;
+  rowNumber: number;
+  sheetTitle: string;
+  error?: string;
+}
+
 /**
- * Bulk sync all forms to Google Sheet "Rekapan Form"
+ * Append form to user's Google Sheet at gid=0 (Row 9+)
  */
-export async function syncAllFormsToGoogleSheets(
-  forms: FormDocument[], 
+export async function appendFormToGoogleSheets(
+  doc: FormDocument, 
   token: string
-): Promise<{ success: number; failed: number }> {
-  let success = 0;
-  let failed = 0;
-  for (const doc of forms) {
-    const ok = await appendFormToGoogleSheets(doc, token);
-    if (ok) success++;
-    else failed++;
+): Promise<AppendFormResult> {
+  try {
+    const targetTab = await getTargetFormsTabTitle(token);
+
+    // Read column A starting at Row 8 (header row) to find the exact next empty row
+    let targetRow = 9;
+    let sequenceIndex = 1;
+
+    try {
+      const getRes = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/'${targetTab}'!A8:A1000`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (getRes.ok) {
+        const getData = await getRes.json();
+        const rows = getData.values || [];
+        if (rows.length > 0) {
+          // If row 8 is header 'No', then row 9 is rows[1]
+          targetRow = 8 + rows.length;
+          sequenceIndex = rows.length; // Row 8 is header, row 9 gets 1, etc.
+        }
+      }
+    } catch (err) {
+      console.warn('Check row index error:', err);
+    }
+
+    const rowData = formatFormRow(doc, sequenceIndex);
+
+    // Write directly using PUT to guarantee exact placement from Row 9 onwards in Columns A through S
+    const writeUrl = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/'${targetTab}'!A${targetRow}:S${targetRow}?valueInputOption=USER_ENTERED`;
+    
+    const putRes = await fetch(writeUrl, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        values: [rowData],
+      }),
+    });
+
+    if (putRes.ok) {
+      return { success: true, rowNumber: targetRow, sheetTitle: targetTab };
+    }
+
+    // Fallback: Use standard append
+    const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/'${targetTab}'!A8:S8:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
+    const appendRes = await fetch(appendUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        values: [rowData],
+      }),
+    });
+
+    if (!appendRes.ok) {
+      const errText = await appendRes.text();
+      console.error('Google Sheets append error:', appendRes.status, errText);
+      return { success: false, rowNumber: targetRow, sheetTitle: targetTab, error: errText };
+    }
+
+    return { success: true, rowNumber: targetRow, sheetTitle: targetTab };
+  } catch (error: any) {
+    console.error('appendFormToGoogleSheets error:', error);
+    return { success: false, rowNumber: 0, sheetTitle: '', error: error?.message || 'Network error' };
   }
-  return { success, failed };
+}
+
+export interface AppendUserResult {
+  success: boolean;
+  rowNumber: number;
+  sheetTitle: string;
+  error?: string;
 }
 
 /**
  * Append registered user to Google Sheet "Master Login"
  */
-export async function appendUserToMasterLogin(user: User, token: string): Promise<boolean> {
+export async function appendUserToMasterLogin(
+  user: User, 
+  token: string
+): Promise<AppendUserResult> {
   try {
-    await ensureSheetTabExists(TAB_MASTER_LOGIN, token);
+    const targetTab = await getTargetMasterLoginTabTitle(token);
 
-    // Check if headers exist, if not prepend headers
+    // Check if headers exist at A1:L1
     try {
       const headRes = await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/'${TAB_MASTER_LOGIN}'!A1:K1`,
+        `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/'${targetTab}'!A1:L1`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (headRes.ok) {
@@ -246,7 +318,7 @@ export async function appendUserToMasterLogin(user: User, token: string): Promis
         if (!headData.values || headData.values.length === 0) {
           // Write headers
           await fetch(
-            `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/'${TAB_MASTER_LOGIN}'!A1:K1?valueInputOption=USER_ENTERED`,
+            `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/'${targetTab}'!A1:L1?valueInputOption=USER_ENTERED`,
             {
               method: 'PUT',
               headers: {
@@ -264,6 +336,7 @@ export async function appendUserToMasterLogin(user: User, token: string): Promis
                   'Peran (Role)',
                   'Jabatan (Title)',
                   'No. WhatsApp / HP',
+                  'Tanda Tangan Digital',
                   'Waktu Registrasi',
                   'Status Akun'
                 ]],
@@ -272,21 +345,24 @@ export async function appendUserToMasterLogin(user: User, token: string): Promis
           );
         }
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.warn('Headers check warning:', err);
     }
 
-    // Get current count
+    // Determine target row
+    let targetRow = 2;
     let userIndex = 1;
     try {
       const countRes = await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/'${TAB_MASTER_LOGIN}'!A2:A1000`,
+        `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/'${targetTab}'!A1:A1000`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (countRes.ok) {
         const cData = await countRes.json();
-        if (cData.values && Array.isArray(cData.values)) {
-          userIndex = cData.values.length + 1;
+        const rows = cData.values || [];
+        if (rows.length > 0) {
+          targetRow = rows.length + 1;
+          userIndex = rows.length;
         }
       }
     } catch {
@@ -303,12 +379,30 @@ export async function appendUserToMasterLogin(user: User, token: string): Promis
       user.role,
       user.title || `${user.role} (${user.division})`,
       user.phone || '-',
+      user.signatureUrl ? 'Tersimpan (Digital Sign)' : 'Belum Upload',
       user.registeredAt || new Date().toISOString(),
       'Aktif (Terverifikasi)'
     ];
 
-    const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/'${TAB_MASTER_LOGIN}'!A:K:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
-    const res = await fetch(appendUrl, {
+    const writeUrl = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/'${targetTab}'!A${targetRow}:L${targetRow}?valueInputOption=USER_ENTERED`;
+    const res = await fetch(writeUrl, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        values: [userRow],
+      }),
+    });
+
+    if (res.ok) {
+      return { success: true, rowNumber: targetRow, sheetTitle: targetTab };
+    }
+
+    // Fallback append
+    const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/'${targetTab}'!A1:L1:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
+    const appendRes = await fetch(appendUrl, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -319,9 +413,55 @@ export async function appendUserToMasterLogin(user: User, token: string): Promis
       }),
     });
 
-    return res.ok;
-  } catch (error) {
+    return { 
+      success: appendRes.ok, 
+      rowNumber: targetRow, 
+      sheetTitle: targetTab, 
+      error: appendRes.ok ? undefined : await appendRes.text() 
+    };
+  } catch (error: any) {
     console.error('appendUserToMasterLogin failed:', error);
-    return false;
+    return { success: false, rowNumber: 0, sheetTitle: '', error: error?.message };
   }
+}
+
+/**
+ * Bulk sync all forms and registered users to the Google Sheet
+ */
+export async function syncAllDataToGoogleSheets(
+  forms: FormDocument[],
+  users: User[],
+  token: string
+): Promise<{ formsCount: number; usersCount: number; sheetTitle: string; errors: string[] }> {
+  const errors: string[] = [];
+  let formsCount = 0;
+  let usersCount = 0;
+
+  // 1. Sync Forms
+  const targetFormsTab = await getTargetFormsTabTitle(token);
+  for (const doc of forms) {
+    const res = await appendFormToGoogleSheets(doc, token);
+    if (res.success) {
+      formsCount++;
+    } else if (res.error) {
+      errors.push(`Form ${doc.docNumber}: ${res.error}`);
+    }
+  }
+
+  // 2. Sync Users
+  for (const u of users) {
+    const res = await appendUserToMasterLogin(u, token);
+    if (res.success) {
+      usersCount++;
+    } else if (res.error) {
+      errors.push(`User ${u.name}: ${res.error}`);
+    }
+  }
+
+  return {
+    formsCount,
+    usersCount,
+    sheetTitle: targetFormsTab,
+    errors,
+  };
 }

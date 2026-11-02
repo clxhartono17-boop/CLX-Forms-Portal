@@ -82,3 +82,52 @@ test('Drive folder path structure matches [NAMA_FORM] / [BULAN] / [TANGGAL] / [N
   assert.equal(folder.shortDocNum, 'FPU-0001');
   assert.equal(folder.fullPath, 'FPU / October / 29 / FPU-0001');
 });
+
+test('formatFormRow produces exact 19 columns aligned with user Google Sheet Row 8 headers', async () => {
+  const { formatFormRow } = await import('./googleWorkspace.ts');
+  const sampleDoc: FormDocument = {
+    id: 'test-2',
+    docNumber: 'FPP-0001/CLX/02/XI/MMXXVI',
+    formType: 'FPP',
+    sequenceNumber: 1,
+    date: '2026-11-02',
+    division: 'Finance',
+    requesterName: 'Hartono Darmawan',
+    requesterRole: 'CSO',
+    requesterEmail: 'hartono@clx.co.id',
+    purpose: 'Biaya BBM Solar & Toll Operasional Armada',
+    paymentMethod: 'Bank Transfer',
+    bankName: 'BCA',
+    bankAccountNo: '8830192831',
+    bankAccountName: 'Hartono Darmawan',
+    items: [],
+    totalAmount: 2500000,
+    terbilang: 'Dua Juta Lima Ratus Ribu Rupiah',
+    status: 'Pending Approval',
+    currentAssigneeRole: 'CSO',
+    signatures: {},
+    attachments: [],
+    createdAt: '2026-11-02T00:00:00Z',
+    updatedAt: '2026-11-02T00:00:00Z',
+  };
+
+  const row = formatFormRow(sampleDoc, 1);
+  // Must match exactly the 19 columns of Row 8 in Rekap Form CLX
+  assert.equal(row.length, 19);
+  assert.equal(row[0], 1); // No
+  assert.equal(row[1], 'FPP'); // Jenis Form
+  assert.equal(row[2], 'FPP-0001/CLX/02/XI/MMXXVI'); // No. Formulir
+  assert.equal(row[3], '2026-11-02'); // Tgl Pengajuan
+  assert.equal(row[4], '2026-11-02'); // Tgl Dibutuhkan
+  assert.equal(row[5], 'Finance'); // Divisi / Dept
+  assert.equal(row[6], 'Hartono Darmawan'); // Pemohon (Requestor)
+  assert.equal(row[7], 'Biaya BBM Solar & Toll Operasional Armada'); // Keperluan
+  assert.equal(row[8], 2500000); // DPP
+  assert.equal(row[9], 0); // Pajak
+  assert.equal(row[10], 2500000); // Total Nilai
+  assert.equal(row[11], 'Bank Transfer'); // Metode Pembayaran
+  assert.ok(row[12].includes('BCA')); // Bank info
+  assert.equal(row[14], 'Maker -> CSO -> COO -> CFO (Selesai di CFO)'); // Level Otorisasi
+  assert.equal(row[15], 'Pending Approval'); // Status Otorisasi
+});
+

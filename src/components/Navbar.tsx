@@ -119,7 +119,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenR
           {/* User Account / Role & Registration */}
           <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
             {/* Google Workspace Connection Button */}
-            <div className="hidden lg:block">
+            <div className="flex items-center">
               <GoogleConnectButton compact={true} />
             </div>
 

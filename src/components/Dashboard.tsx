@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext.tsx';
 import { FormDocument, FormType, Division, ApprovalStatus } from '../types/index.ts';
 import { formatRupiah, generateOfficialFormPdf, generateMergedPdf, downloadPdf } from '../utils/pdfGenerator.ts';
 import { GOOGLE_SHEETS_TEMPLATE_URL, GOOGLE_DRIVE_PARENT_FOLDER_ID, SHEET_TAB_REKAPAN_FORM } from '../utils/googleIntegration.ts';
-import { syncAllFormsToGoogleSheets } from '../utils/googleWorkspace.ts';
+import { syncAllDataToGoogleSheets, SPREADSHEET_URL } from '../utils/googleWorkspace.ts';
 import { DashboardCharts } from './DashboardCharts.tsx';
 import { 
   Search, 
@@ -22,7 +22,8 @@ import {
   FileSpreadsheet, 
   RotateCcw, 
   BarChart2,
-  RefreshCw
+  RefreshCw,
+  Layers
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -32,18 +33,12 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }) => {
   const { forms, resetToDefault } = useForms();
-  const { isGoogleConnected, googleToken, connectGoogle } = useAuth();
+  const { isGoogleConnected, googleUser, googleToken, connectGoogle, registeredUsers } = useAuth();
 
   const [isSyncingSheets, setIsSyncingSheets] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
 
   const handleSyncAll = async () => {
-    if (forms.length === 0) {
-      setSyncFeedback('Belum ada formulir untuk disinkronkan.');
-      setTimeout(() => setSyncFeedback(null), 3500);
-      return;
-    }
-
     let token = googleToken;
     if (!token) {
       try {
@@ -58,15 +53,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
     if (!token) return;
 
     setIsSyncingSheets(true);
-    setSyncFeedback('Sedang menyinkronkan data ke sheet "Rekapan Form"...');
+    setSyncFeedback('Sedang menyinkronkan data ke spreadsheet Rekap Form CLX...');
     try {
-      const res = await syncAllFormsToGoogleSheets(forms, token);
-      setSyncFeedback(`Berhasil menyinkronkan ${res.success} formulir ke Google Sheet "Rekapan Form"!`);
+      const res = await syncAllDataToGoogleSheets(forms, registeredUsers, token);
+      setSyncFeedback(
+        `Berhasil! ${res.formsCount} formulir masuk ke tab "${res.sheetTitle}" (mulai baris 9) & ${res.usersCount} user ke tab "Master Login"!`
+      );
     } catch (err: any) {
       setSyncFeedback(`Gagal sinkronisasi: ${err?.message || 'Periksa koneksi'}`);
     } finally {
       setIsSyncingSheets(false);
-      setTimeout(() => setSyncFeedback(null), 5000);
+      setTimeout(() => setSyncFeedback(null), 8000);
     }
   };
 

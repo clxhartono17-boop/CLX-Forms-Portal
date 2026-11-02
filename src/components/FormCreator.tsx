@@ -19,8 +19,11 @@ import {
   CreditCard,
   Layers,
   Lock,
-  UserCheck
+  UserCheck,
+  ExternalLink,
+  RefreshCw
 } from 'lucide-react';
+import { SPREADSHEET_URL } from '../utils/googleWorkspace.ts';
 
 interface FormCreatorProps {
   onSuccess: (createdDoc: FormDocument) => void;
@@ -28,9 +31,20 @@ interface FormCreatorProps {
 }
 
 export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel }) => {
-  const { currentUser, setShowAuthModal } = useAuth();
+  const { 
+    currentUser, 
+    setShowAuthModal, 
+    isGoogleConnected, 
+    googleUser, 
+    googleToken, 
+    connectGoogle 
+  } = useAuth();
   const { getNextSequence, addForm } = useForms();
   const fileInputId = useId();
+
+  const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
+  const [showPromptGoogle, setShowPromptGoogle] = useState(false);
+  const [successModalDoc, setSuccessModalDoc] = useState<FormDocument | null>(null);
 
   const [formType, setFormType] = useState<FormType>('FPU');
   const [selectedDate, setSelectedDate] = useState<string>(() => {
@@ -188,6 +202,24 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
     updatedAt: new Date().toISOString(),
   };
 
+  const executeSave = async () => {
+    setIsSubmitting(true);
+    setValidationError(null);
+    try {
+      const newDoc: FormDocument = {
+        ...currentDraftDoc,
+        id: `${formType.toLowerCase()}-${Date.now()}`,
+      };
+
+      const savedDoc = await addForm(newDoc);
+      setSuccessModalDoc(savedDoc);
+    } catch (err: any) {
+      setValidationError(err?.message || 'Gagal menyimpan dokumen. Silakan periksa kembali.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setValidationError(null);
@@ -202,20 +234,13 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
       return;
     }
 
-    setIsSubmitting(true);
-    try {
-      const newDoc: FormDocument = {
-        ...currentDraftDoc,
-        id: `${formType.toLowerCase()}-${Date.now()}`,
-      };
-
-      const savedDoc = await addForm(newDoc);
-      onSuccess(savedDoc);
-    } catch (err: any) {
-      setValidationError(err?.message || 'Gagal menyimpan dokumen. Silakan periksa kembali.');
-    } finally {
-      setIsSubmitting(false);
+    // If Google is not connected, prompt the user first so data writes directly to spreadsheet
+    if (!isGoogleConnected && !googleToken) {
+      setShowPromptGoogle(true);
+      return;
     }
+
+    await executeSave();
   };
 
   if (!currentUser) {
@@ -678,6 +703,86 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
             )}
           </div>
 
+          {/* 6. Google Sheets & Drive Real-time Sync Status */}
+          <div className={`p-4 rounded-xl border transition-all ${
+            isGoogleConnected 
+              ? 'bg-emerald-50/80 border-emerald-200' 
+              : 'bg-amber-50/90 border-amber-300'
+          }`}>
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-start space-x-3">
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${
+                  isGoogleConnected ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                }`}>
+                  <Layers className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-xs font-bold text-slate-900">
+                      {isGoogleConnected ? 'Google Sheets Terhubung (Siap Simpan Otomatis)' : 'Google Sheets Belum Terhubung'}
+                    </span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      isGoogleConnected ? 'bg-emerald-200 text-emerald-800' : 'bg-amber-200 text-amber-900'
+                    }`}>
+                      {isGoogleConnected ? 'Otomatis Masuk Row 9+' : 'Wajib Disambungkan'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">
+                    {isGoogleConnected ? (
+                      <>
+                        Akun aktif: <strong>{googleUser?.email}</strong>. Data form akan langsung masuk ke spreadsheet master: <strong>Rekap Form CLX</strong> (gid=0).
+                      </>
+                    ) : (
+                      <>
+                        Agar formulir Anda langsung masuk ke spreadsheet <strong>Rekap Form CLX</strong>, silakan klik tombol di samping untuk otorisasi Google (1x klik).
+                      </>
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              {!isGoogleConnected ? (
+                <button
+                  type="button"
+                  disabled={isConnectingGoogle}
+                  onClick={async () => {
+                    setIsConnectingGoogle(true);
+                    try {
+                      await connectGoogle();
+                    } catch (e: any) {
+                      setValidationError(e?.message || 'Gagal menghubungkan akun Google.');
+                    } finally {
+                      setIsConnectingGoogle(false);
+                    }
+                  }}
+                  className="w-full sm:w-auto shrink-0 inline-flex items-center justify-center space-x-2 px-3.5 py-2 bg-white hover:bg-amber-100 text-slate-800 border border-amber-300 rounded-lg text-xs font-bold shadow-xs transition"
+                >
+                  {isConnectingGoogle ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                  ) : (
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 48 48">
+                      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+                    </svg>
+                  )}
+                  <span>{isConnectingGoogle ? 'Menghubungkan...' : 'Hubungkan Google Sekarang'}</span>
+                </button>
+              ) : (
+                <a
+                  href={SPREADSHEET_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="w-full sm:w-auto shrink-0 inline-flex items-center justify-center space-x-1.5 px-3 py-1.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-900 border border-emerald-300 rounded-lg text-xs font-semibold transition"
+                >
+                  <span>Buka Google Sheet</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
+            </div>
+          </div>
+
           {/* Action Buttons */}
           <div className="flex items-center justify-end space-x-3 pt-2">
             <button
@@ -702,10 +807,138 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
               className="inline-flex items-center space-x-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm transition disabled:opacity-50"
             >
               <Save className="w-4 h-4" />
-              <span>{isSubmitting ? 'Memproses & Sync Drive...' : 'Simpan & Ajukan Form'}</span>
+              <span>{isSubmitting ? 'Menyimpan & Menulis ke Sheet...' : 'Simpan & Ajukan Form'}</span>
             </button>
           </div>
         </form>
+      )}
+
+      {/* Modal 1: Prompt Connect Google Before Save */}
+      {showPromptGoogle && (
+        <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full p-6 text-center animate-in fade-in zoom-in-95">
+            <div className="w-14 h-14 bg-amber-100 text-amber-700 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-200">
+              <Layers className="w-7 h-7" />
+            </div>
+            <h3 className="text-base font-bold text-slate-900">
+              Hubungkan Akun Google Anda
+            </h3>
+            <p className="text-xs text-slate-600 mt-2 leading-relaxed">
+              Anda belum menghubungkan akun Google. Untuk memastikan form <strong>{autoDocNumber}</strong> langsung masuk ke Google Sheet <strong>Rekap Form CLX</strong>, hubungkan akun Google Anda sekarang.
+            </p>
+
+            <div className="mt-6 flex flex-col gap-2.5">
+              <button
+                type="button"
+                disabled={isConnectingGoogle}
+                onClick={async () => {
+                  setIsConnectingGoogle(true);
+                  try {
+                    await connectGoogle();
+                    setShowPromptGoogle(false);
+                    await executeSave();
+                  } catch (err: any) {
+                    setValidationError(err?.message || 'Gagal login Google.');
+                    setShowPromptGoogle(false);
+                  } finally {
+                    setIsConnectingGoogle(false);
+                  }
+                }}
+                className="w-full inline-flex items-center justify-center space-x-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-md transition"
+              >
+                {isConnectingGoogle ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <svg className="w-4 h-4 bg-white rounded-full p-0.5" viewBox="0 0 48 48">
+                    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+                  </svg>
+                )}
+                <span>{isConnectingGoogle ? 'Menghubungkan...' : 'Hubungkan Google & Simpan ke Sheet'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  setShowPromptGoogle(false);
+                  await executeSave();
+                }}
+                className="w-full px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition"
+              >
+                Simpan di Sistem Saja (Sinkronisasi Nanti)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 2: Success Confirmation with Exact Google Sheet Row details */}
+      {successModalDoc && (
+        <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full p-6 text-center animate-in fade-in zoom-in-95">
+            <div className="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-emerald-200 shadow-xs">
+              <CheckCircle className="w-8 h-8" />
+            </div>
+
+            <span className="inline-block px-3 py-1 bg-emerald-100 text-emerald-900 text-[11px] font-bold uppercase rounded-full mb-2">
+              Pengajuan Berhasil Disimpan
+            </span>
+            <h3 className="text-lg font-black text-slate-900">
+              {successModalDoc.docNumber}
+            </h3>
+            <p className="text-xs text-slate-600 mt-1">
+              {successModalDoc.formType} • Divisi {successModalDoc.division} • Total: <strong>Rp {successModalDoc.totalAmount.toLocaleString('id-ID')}</strong>
+            </p>
+
+            {/* Google Sheets Sync Result Status */}
+            <div className={`mt-5 p-3.5 rounded-xl border text-left text-xs ${
+              successModalDoc.googleSheets?.synced
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                : 'bg-amber-50 border-amber-200 text-amber-900'
+            }`}>
+              <div className="font-bold flex items-center space-x-1.5">
+                <span>{successModalDoc.googleSheets?.synced ? '✅ Tercatat di Google Sheet' : 'ℹ️ Tersimpan di Sistem CLX'}</span>
+              </div>
+              <p className="text-[11px] mt-1 leading-relaxed">
+                {successModalDoc.googleSheets?.synced ? (
+                  <>
+                    Data telah berhasil ditulis langsung ke tab <strong>"{successModalDoc.googleSheets?.sheetName}"</strong> pada <strong>Baris {successModalDoc.googleSheets?.rowNumber}</strong> (sesuai template 19 kolom Anda).
+                  </>
+                ) : (
+                  <>
+                    Formulir tersimpan di database lokal. Anda dapat menghubungkan Google di tombol atas atau menu dashboard untuk menyinkronkan kapan saja.
+                  </>
+                )}
+              </p>
+            </div>
+
+            <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
+              <a
+                href={SPREADSHEET_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="w-full sm:w-auto px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition flex items-center justify-center space-x-1.5"
+              >
+                <span>Buka Google Sheet</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const d = successModalDoc;
+                  setSuccessModalDoc(null);
+                  onSuccess(d);
+                }}
+                className="w-full sm:w-auto px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs transition"
+              >
+                Lihat di Dashboard
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

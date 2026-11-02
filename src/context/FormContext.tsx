@@ -58,20 +58,30 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let updatedDoc = { ...newDoc };
 
     try {
-      // 1. Automatically record to Google Sheet "Rekapan Form"
+      // 1. Automatically record to Google Sheet at gid=0
       const googleToken = getGoogleAccessToken();
       let sheetsSuccess = false;
+      let targetRowNumber: number | undefined;
+      let targetSheetName = 'Rekap Form CLX';
+
       if (googleToken) {
-        sheetsSuccess = await appendFormToGoogleSheets(updatedDoc, googleToken);
+        const sheetsRes = await appendFormToGoogleSheets(updatedDoc, googleToken);
+        sheetsSuccess = sheetsRes.success;
+        targetRowNumber = sheetsRes.rowNumber;
+        targetSheetName = sheetsRes.sheetTitle || targetSheetName;
       }
 
-      const sheetsRes = await syncToGoogleSheets(updatedDoc);
+      try {
+        await syncToGoogleSheets(updatedDoc);
+      } catch (err) {
+        console.warn('Backend sheets proxy notice:', err);
+      }
 
       updatedDoc.googleSheets = {
-        synced: sheetsSuccess || true,
-        rowNumber: sheetsRes.rowNumber,
-        sheetName: 'Rekapan Form',
-        syncedAt: new Date().toISOString(),
+        synced: sheetsSuccess,
+        rowNumber: targetRowNumber,
+        sheetName: targetSheetName,
+        syncedAt: sheetsSuccess ? new Date().toISOString() : undefined,
       };
     } catch (err) {
       console.warn('Google sync notice on creation:', err);
