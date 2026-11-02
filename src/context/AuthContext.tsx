@@ -6,7 +6,8 @@ import {
   signInWithGoogle, 
   signOutGoogle, 
   appendUserToMasterLogin,
-  getGoogleAccessToken 
+  getGoogleAccessToken,
+  GoogleAuthUser
 } from '../utils/googleWorkspace.ts';
 import { User as FirebaseUser } from 'firebase/auth';
 
@@ -35,7 +36,7 @@ interface AuthContextType {
   authModalMode: 'login' | 'register';
   setAuthModalMode: (mode: 'login' | 'register') => void;
   // Google Workspace OAuth State
-  googleUser: FirebaseUser | null;
+  googleUser: GoogleAuthUser | null;
   googleToken: string | null;
   isGoogleConnected: boolean;
   connectGoogle: () => Promise<string | null>;
@@ -143,13 +144,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [authModalMode, setAuthModalMode] = useState<'login' | 'register'>('register');
 
   // Google Workspace Auth State
-  const [googleUser, setGoogleUser] = useState<FirebaseUser | null>(null);
+  const [googleUser, setGoogleUser] = useState<GoogleAuthUser | null>(null);
   const [googleToken, setGoogleToken] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = initGoogleAuth(
       (user, token) => {
-        setGoogleUser(user);
+        setGoogleUser({
+          email: user.email,
+          displayName: user.displayName,
+          uid: user.uid,
+          photoURL: user.photoURL,
+        });
         setGoogleToken(token);
       },
       () => {

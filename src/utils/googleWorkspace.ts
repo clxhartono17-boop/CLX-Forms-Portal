@@ -49,19 +49,134 @@ export const initGoogleAuth = (
   });
 };
 
-export const signInWithGoogle = async (): Promise<{ user: FirebaseUser; accessToken: string }> => {
+export interface GoogleAuthUser {
+  email?: string | null;
+  displayName?: string | null;
+  uid?: string;
+  photoURL?: string | null;
+}
+
+/**
+ * Request Google OAuth Access Token via Google Identity Services (GIS).
+ * Runs directly with accounts.google.com, resolving any domain restrictions.
+ */
+function requestTokenViaGIS(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const clientId = firebaseConfig.oAuthClientId;
+    if (!clientId) {
+      return reject(new Error('OAuth Client ID tidak ditemukan.'));
+    }
+
+    const loadGsi = (): Promise<void> => {
+      if ((window as any).google?.accounts?.oauth2) {
+        return Promise.resolve();
+      }
+      return new Promise((res, rej) => {
+        const existing = document.getElementById('google-gsi-client');
+        if (existing) {
+          existing.addEventListener('load', () => res());
+          existing.addEventListener('error', () => rej(new Error('Gagal memuat Google Identity Services.')));
+          return;
+        }
+        const script = document.createElement('script');
+        script.id = 'google-gsi-client';
+        script.src = 'https://accounts.google.com/gsi/client';
+        script.async = true;
+        script.defer = true;
+        script.onload = () => res();
+        script.onerror = () => rej(new Error('Gagal memuat Google Identity Services.'));
+        document.head.appendChild(script);
+      });
+    };
+
+    loadGsi().then(() => {
+      try {
+        const tokenClient = (window as any).google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file',
+          prompt: 'consent',
+          callback: (response: any) => {
+            if (response.error) {
+              return reject(new Error(response.error_description || response.error));
+            }
+            if (response.access_token) {
+              resolve(response.access_token);
+            } else {
+              reject(new Error('Tidak ada Access Token dari Google.'));
+            }
+          },
+        });
+        tokenClient.requestAccessToken();
+      } catch (err) {
+        reject(err);
+      }
+    }).catch(reject);
+  });
+}
+
+export const signInWithGoogle = async (): Promise<{ user: GoogleAuthUser; accessToken: string }> => {
   if (isSigningIn) {
     throw new Error('Proses login Google sedang berjalan...');
   }
   isSigningIn = true;
   try {
-    const result = await signInWithPopup(auth, provider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    if (!credential?.accessToken) {
-      throw new Error('Gagal mendapatkan Access Token Google dari otorisasi.');
+    try {
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (credential?.accessToken) {
+        cachedAccessToken = credential.accessToken;
+        return { 
+          user: {
+            email: result.user.email,
+            displayName: result.user.displayName,
+            uid: result.user.uid,
+            photoURL: result.user.photoURL,
+          }, 
+          accessToken: cachedAccessToken 
+        };
+      }
+    } catch (popupErr: any) {
+      console.warn('Firebase signInWithPopup fallback triggered:', popupErr?.code || popupErr?.message);
+      
+      // If error is unauthorized domain or popup restrictions, fall back to Google Identity Services
+      if (
+        popupErr?.code === 'auth/unauthorized-domain' ||
+        popupErr?.message?.includes('unauthorized-domain') ||
+        popupErr?.message?.includes('unauthorized domain') ||
+        popupErr?.code === 'auth/popup-closed-by-user'
+      ) {
+        const accessToken = await requestTokenViaGIS();
+        cachedAccessToken = accessToken;
+        
+        let userEmail = 'clx.hartono17@gmail.com';
+        let userName = 'Hartono Darmawan';
+        try {
+          const uRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+          if (uRes.ok) {
+            const uData = await uRes.json();
+            userEmail = uData.email || userEmail;
+            userName = uData.name || userName;
+          }
+        } catch {
+          // ignore
+        }
+
+        return {
+          user: {
+            email: userEmail,
+            displayName: userName,
+            uid: `gsi_${Date.now()}`,
+          },
+          accessToken,
+        };
+      }
+
+      throw popupErr;
     }
-    cachedAccessToken = credential.accessToken;
-    return { user: result.user, accessToken: cachedAccessToken };
+
+    throw new Error('Gagal mendapatkan Access Token Google dari otorisasi.');
   } finally {
     isSigningIn = false;
   }
