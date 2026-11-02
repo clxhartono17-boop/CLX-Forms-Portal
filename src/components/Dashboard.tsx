@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext.tsx';
 import { FormDocument, FormType, Division, ApprovalStatus } from '../types/index.ts';
 import { formatRupiah, generateOfficialFormPdf, generateMergedPdf, downloadPdf } from '../utils/pdfGenerator.ts';
 import { GOOGLE_SHEETS_TEMPLATE_URL, GOOGLE_DRIVE_PARENT_FOLDER_ID, SHEET_TAB_REKAPAN_FORM } from '../utils/googleIntegration.ts';
-import { syncAllDataToGoogleSheets, SPREADSHEET_URL } from '../utils/googleWorkspace.ts';
+import { syncAllDataToGoogleSheets, SPREADSHEET_URL, copyFormsToClipboard, downloadFormsCsv } from '../utils/googleWorkspace.ts';
 import { DashboardCharts } from './DashboardCharts.tsx';
 import { 
   Search, 
@@ -23,7 +23,9 @@ import {
   RotateCcw, 
   BarChart2,
   RefreshCw,
-  Layers
+  Layers,
+  Copy,
+  Check
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -37,6 +39,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
 
   const [isSyncingSheets, setIsSyncingSheets] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+  const [copiedB9, setCopiedB9] = useState(false);
+
+  const handleCopyB9 = async () => {
+    const ok = await copyFormsToClipboard(filteredForms);
+    if (ok) {
+      setCopiedB9(true);
+      setSyncFeedback(`✅ ${filteredForms.length} formulir berhasil disalin ke clipboard! Buka Google Sheet Anda, klik sel B9, lalu tekan Ctrl+V.`);
+      setTimeout(() => setCopiedB9(false), 5000);
+      setTimeout(() => setSyncFeedback(null), 8000);
+    }
+  };
 
   const handleSyncAll = async () => {
     let token = googleToken;
@@ -57,7 +70,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
     try {
       const res = await syncAllDataToGoogleSheets(forms, registeredUsers, token);
       setSyncFeedback(
-        `Berhasil! ${res.formsCount} formulir masuk ke tab "${res.sheetTitle}" (mulai baris 9) & ${res.usersCount} user ke tab "Master Login"!`
+        `Berhasil! ${res.formsCount} formulir masuk ke tab "${res.sheetTitle}" (mulai baris 9, kolom B-T) & ${res.usersCount} user ke tab "Master Login"!`
       );
     } catch (err: any) {
       setSyncFeedback(`Gagal sinkronisasi: ${err?.message || 'Periksa koneksi'}`);
@@ -148,37 +161,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
   };
 
   const handleExportCsv = () => {
-    const headers = [
-      'Document Number',
-      'Date',
-      'Type',
-      'Division',
-      'Requester',
-      'Purpose',
-      'Total Amount (IDR)',
-      'Status',
-      'Drive Folder Path',
-    ];
-    const rows = filteredForms.map(f => [
-      `"${f.docNumber}"`,
-      `"${f.date}"`,
-      `"${f.formType}"`,
-      `"${f.division}"`,
-      `"${f.requesterName}"`,
-      `"${f.purpose.replace(/"/g, '""')}"`,
-      f.totalAmount,
-      `"${f.status}"`,
-      `"${f.googleDrive?.folderPath || ''}"`,
-    ]);
-
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `CLX_Forms_Summary_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    downloadFormsCsv(filteredForms);
   };
 
   return (
@@ -252,21 +235,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
 
           <div className="flex flex-wrap items-center gap-2">
             <button
+              onClick={handleCopyB9}
+              title="Salin baris form secara langsung untuk dipaste ke sel B9 Google Sheet (tanpa perlu otorisasi Google)"
+              className="inline-flex items-center space-x-1 px-3 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition shadow-2xs"
+            >
+              {copiedB9 ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{copiedB9 ? 'Tersalin!' : '📋 Salin Data (Paste ke B9)'}</span>
+            </button>
+
+            <button
               onClick={handleSyncAll}
               disabled={isSyncingSheets}
-              title="Kirim semua data form ke tab Rekapan Form Google Spreadsheet"
-              className="inline-flex items-center space-x-1 px-3 py-2 text-xs font-bold text-emerald-800 bg-emerald-100/80 hover:bg-emerald-200 border border-emerald-300 rounded-lg transition shadow-2xs disabled:opacity-50"
+              title="Kirim semua data form ke tab Rekap Form CLX Google Spreadsheet via API"
+              className="inline-flex items-center space-x-1 px-3 py-2 text-xs font-bold text-blue-800 bg-blue-100 hover:bg-blue-200 border border-blue-300 rounded-lg transition shadow-2xs disabled:opacity-50"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isSyncingSheets ? 'animate-spin' : ''}`} />
-              <span>{isSyncingSheets ? 'Menyinkronkan...' : 'Sinkronkan ke Sheet'}</span>
+              <span>{isSyncingSheets ? 'Menyinkronkan...' : '⚡ Sinkronkan API'}</span>
             </button>
 
             <button
               onClick={handleExportCsv}
-              className="inline-flex items-center space-x-1 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
+              title="Unduh CSV Rekap Form CLX dengan kolom dan header Row 8 sesuai template"
+              className="inline-flex items-center space-x-1 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg transition"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>Export CSV</span>
+              <span>Unduh CSV</span>
             </button>
 
             <a

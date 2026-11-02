@@ -5,7 +5,7 @@ import { FormDocument, FormType, ApprovalStatus } from '../types/index.ts';
 import { formatRupiah, generateMergedPdf, downloadPdf } from '../utils/pdfGenerator.ts';
 import { requiresCeoApproval } from '../utils/approvalRules.ts';
 import { GOOGLE_SHEETS_TEMPLATE_URL, GOOGLE_DRIVE_PARENT_FOLDER_ID } from '../utils/googleIntegration.ts';
-import { syncAllDataToGoogleSheets, SPREADSHEET_URL } from '../utils/googleWorkspace.ts';
+import { syncAllDataToGoogleSheets, SPREADSHEET_URL, copyFormsToClipboard, downloadFormsCsv } from '../utils/googleWorkspace.ts';
 import { 
   FileText, 
   Clock, 
@@ -25,7 +25,10 @@ import {
   Building,
   User as UserIcon,
   HelpCircle,
-  RefreshCw
+  RefreshCw,
+  Copy,
+  Check,
+  FileSpreadsheet
 } from 'lucide-react';
 
 interface StaffMakerDashboardProps {
@@ -42,6 +45,17 @@ export const StaffMakerDashboard: React.FC<StaffMakerDashboardProps> = ({
 
   const [isSyncingSheets, setIsSyncingSheets] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+  const [copiedB9, setCopiedB9] = useState(false);
+
+  const handleCopyB9 = async () => {
+    const ok = await copyFormsToClipboard(forms);
+    if (ok) {
+      setCopiedB9(true);
+      setSyncFeedback(`✅ ${forms.length} formulir berhasil disalin! Buka Google Sheet Anda, klik sel B9, lalu tekan Ctrl+V.`);
+      setTimeout(() => setCopiedB9(false), 5000);
+      setTimeout(() => setSyncFeedback(null), 8000);
+    }
+  };
 
   const handleSyncAll = async () => {
     let token = googleToken;
@@ -62,7 +76,7 @@ export const StaffMakerDashboard: React.FC<StaffMakerDashboardProps> = ({
     try {
       const res = await syncAllDataToGoogleSheets(forms, registeredUsers, token);
       setSyncFeedback(
-        `Berhasil! ${res.formsCount} formulir masuk ke tab "${res.sheetTitle}" (mulai baris 9) & ${res.usersCount} user ke tab "Master Login"!`
+        `Berhasil! ${res.formsCount} formulir masuk ke tab "${res.sheetTitle}" (mulai baris 9, kolom B-T) & ${res.usersCount} user ke tab "Master Login"!`
       );
     } catch (err: any) {
       setSyncFeedback(`Gagal sinkronisasi: ${err?.message || 'Periksa koneksi'}`);
@@ -207,18 +221,36 @@ export const StaffMakerDashboard: React.FC<StaffMakerDashboardProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center space-x-2 w-full sm:w-auto shrink-0">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto shrink-0">
+            <button
+              onClick={handleCopyB9}
+              title="Salin baris form secara langsung untuk dipaste ke sel B9 Google Sheet (tanpa perlu otorisasi Google)"
+              className="inline-flex items-center justify-center space-x-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs transition"
+            >
+              {copiedB9 ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{copiedB9 ? 'Tersalin!' : '📋 Salin Data (Paste ke B9)'}</span>
+            </button>
+
             <button
               onClick={handleSyncAll}
               disabled={isSyncingSheets}
-              className="flex-1 sm:flex-none inline-flex items-center justify-center space-x-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-xs transition disabled:opacity-50"
+              className="inline-flex items-center justify-center space-x-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-xs transition disabled:opacity-50"
             >
               {isSyncingSheets ? (
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
               ) : (
                 <RefreshCw className="w-3.5 h-3.5" />
               )}
-              <span>{isSyncingSheets ? 'Menyinkronkan...' : '⚡ Sinkronkan ke Google Sheet'}</span>
+              <span>{isSyncingSheets ? 'Menyinkronkan...' : '⚡ Sinkronkan API'}</span>
+            </button>
+
+            <button
+              onClick={() => downloadFormsCsv(forms)}
+              title="Unduh CSV Rekap Form CLX sesuai template kolom Row 8"
+              className="inline-flex items-center space-x-1 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg text-xs font-semibold shadow-2xs transition"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>CSV</span>
             </button>
 
             <a

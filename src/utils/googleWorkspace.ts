@@ -328,7 +328,8 @@ export interface AppendFormResult {
 }
 
 /**
- * Append form to user's Google Sheet at gid=0 (Row 9+)
+ * Append form to user's Google Sheet at gid=0 (Row 9+, Columns B through T)
+ * Column A is intentionally preserved as an empty margin column matching user's template
  */
 export async function appendFormToGoogleSheets(
   doc: FormDocument, 
@@ -337,20 +338,20 @@ export async function appendFormToGoogleSheets(
   try {
     const targetTab = await getTargetFormsTabTitle(token);
 
-    // Read column A starting at Row 8 (header row) to find the exact next empty row
+    // Read column B starting at Row 8 (header row 'No') to find the exact next empty row
     let targetRow = 9;
     let sequenceIndex = 1;
 
     try {
       const getRes = await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/'${targetTab}'!A8:A1000`,
+        `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/'${targetTab}'!B8:B1000`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (getRes.ok) {
         const getData = await getRes.json();
         const rows = getData.values || [];
         if (rows.length > 0) {
-          // If row 8 is header 'No', then row 9 is rows[1]
+          // Row 8 is header 'No', then row 9 is rows[1]
           targetRow = 8 + rows.length;
           sequenceIndex = rows.length; // Row 8 is header, row 9 gets 1, etc.
         }
@@ -361,8 +362,8 @@ export async function appendFormToGoogleSheets(
 
     const rowData = formatFormRow(doc, sequenceIndex);
 
-    // Write directly using PUT to guarantee exact placement from Row 9 onwards in Columns A through S
-    const writeUrl = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/'${targetTab}'!A${targetRow}:S${targetRow}?valueInputOption=USER_ENTERED`;
+    // Write directly using PUT into Columns B through T (A is empty margin)
+    const writeUrl = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/'${targetTab}'!B${targetRow}:T${targetRow}?valueInputOption=USER_ENTERED`;
     
     const putRes = await fetch(writeUrl, {
       method: 'PUT',
@@ -379,8 +380,8 @@ export async function appendFormToGoogleSheets(
       return { success: true, rowNumber: targetRow, sheetTitle: targetTab };
     }
 
-    // Fallback: Use standard append
-    const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/'${targetTab}'!A8:S8:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
+    // Fallback: Use standard append targeting Columns B:T
+    const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/'${targetTab}'!B8:T8:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
     const appendRes = await fetch(appendUrl, {
       method: 'POST',
       headers: {
@@ -403,6 +404,80 @@ export async function appendFormToGoogleSheets(
     console.error('appendFormToGoogleSheets error:', error);
     return { success: false, rowNumber: 0, sheetTitle: '', error: error?.message || 'Network error' };
   }
+}
+
+/**
+ * Format all forms into Tab-Separated Values (TSV) matching Columns B through T
+ * For direct 1-click paste into Cell B9 of Google Sheets
+ */
+export function formatFormsToTsv(forms: FormDocument[]): string {
+  return forms
+    .map((doc, idx) => {
+      const row = formatFormRow(doc, idx + 1);
+      return row
+        .map(cell => {
+          if (cell === null || cell === undefined) return '';
+          return String(cell).replace(/\t/g, ' ').replace(/\r?\n/g, ' ');
+        })
+        .join('\t');
+    })
+    .join('\n');
+}
+
+/**
+ * Copy TSV data directly to clipboard for pasting into Cell B9
+ */
+export async function copyFormsToClipboard(forms: FormDocument[]): Promise<boolean> {
+  try {
+    const tsv = formatFormsToTsv(forms);
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(tsv);
+      return true;
+    }
+    const ta = document.createElement('textarea');
+    ta.value = tsv;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    return true;
+  } catch (err) {
+    console.warn('Clipboard copy error:', err);
+    return false;
+  }
+}
+
+/**
+ * Generate CSV formatted for the user's template
+ */
+export function generateFormsCsv(forms: FormDocument[]): string {
+  const header = ',No,Jenis Form,No. Formulir,Tgl Pengajuan,Tgl Dibutuhkan,Divisi / Dept,Pemohon (Requestor),Keperluan / Perincian Pengeluaran,Nominal DPP (Rp),Pajak / PPN / PPh,Total Nilai (Rp),Metode Pembayaran,Nama Bank & No. Rekening Penerima,Estimasi Selesai (Kas Bon),Level Otorisasi Diperlukan,Status Otorisasi,Status Kas Bon,Catatan / Keterangan,Link Dokumen / Lampiran';
+  
+  const dataRows = forms.map((doc, idx) => {
+    const row = formatFormRow(doc, idx + 1);
+    const escaped = row.map(val => {
+      const str = String(val ?? '').replace(/"/g, '""');
+      return `"${str}"`;
+    });
+    return `,"${escaped.join('","')}`;
+  });
+
+  return [header, ...dataRows].join('\n');
+}
+
+export function downloadFormsCsv(forms: FormDocument[]) {
+  const csv = generateFormsCsv(forms);
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.setAttribute('href', url);
+  link.setAttribute('download', `Rekap_Form_CLX_${new Date().toISOString().slice(0, 10)}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 export interface AppendUserResult {

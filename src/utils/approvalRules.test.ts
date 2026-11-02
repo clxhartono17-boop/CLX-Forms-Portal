@@ -125,9 +125,51 @@ test('formatFormRow produces exact 19 columns aligned with user Google Sheet Row
   assert.equal(row[8], 2500000); // DPP
   assert.equal(row[9], 0); // Pajak
   assert.equal(row[10], 2500000); // Total Nilai
-  assert.equal(row[11], 'Bank Transfer'); // Metode Pembayaran
-  assert.ok(row[12].includes('BCA')); // Bank info
-  assert.equal(row[14], 'Maker -> CSO -> COO -> CFO (Selesai di CFO)'); // Level Otorisasi
-  assert.equal(row[15], 'Pending Approval'); // Status Otorisasi
+  assert.equal(row[11], 'Bank Transfer'); // Metode Pembayaran (Col M)
+  assert.ok(row[12].includes('BCA')); // Bank info (Col N)
+  assert.equal(row[13], '-'); // Estimasi Selesai Kas Bon (Col O)
+  assert.equal(row[14], 'Maker -> CSO -> COO -> CFO (Selesai di CFO)'); // Level Otorisasi (Col P)
+  assert.equal(row[15], 'Pending Approval'); // Status Otorisasi (Col Q)
+  assert.equal(row[16], '-'); // Status Kas Bon (Col R)
+  assert.ok(row[17].includes('Portal')); // Catatan (Col S)
+  assert.ok(row[18].includes('CLX')); // Link Dokumen (Col T)
+});
+
+test('formatFormsToTsv produces tab-separated string suitable for pasting into Cell B9', async () => {
+  const { formatFormsToTsv, generateFormsCsv } = await import('./googleWorkspace.ts');
+  const sampleDoc: FormDocument = {
+    id: 'test-tsv',
+    docNumber: 'FPPB-0001/CLX/29/X/MMXXVI',
+    formType: 'FPPB',
+    sequenceNumber: 1,
+    date: '2026-10-29',
+    division: 'Services',
+    requesterName: 'Hartono Darmawan',
+    requesterRole: 'CSO',
+    requesterEmail: 'hartono@clx.co.id',
+    purpose: 'untuk pembelian CCTV',
+    paymentMethod: 'Bank Transfer',
+    bankName: 'BCA (Bank Central Asia)',
+    bankAccountNo: '8830192831',
+    items: [],
+    totalAmount: 4500000,
+    terbilang: 'Empat Juta Lima Ratus Ribu Rupiah',
+    status: 'Pending Approval',
+    currentAssigneeRole: 'CSO',
+    signatures: {},
+    attachments: [],
+    createdAt: '2026-10-29T00:00:00Z',
+    updatedAt: '2026-10-29T00:00:00Z',
+  };
+
+  const tsv = formatFormsToTsv([sampleDoc]);
+  const parts = tsv.split('\t');
+  assert.equal(parts.length, 19);
+  assert.equal(parts[0], '1'); // No
+  assert.equal(parts[1], 'FPPB'); // Jenis Form
+  assert.equal(parts[2], 'FPPB-0001/CLX/29/X/MMXXVI'); // No. Formulir
+
+  const csv = generateFormsCsv([sampleDoc]);
+  assert.ok(csv.startsWith(',No,Jenis Form,No. Formulir'));
 });
 
