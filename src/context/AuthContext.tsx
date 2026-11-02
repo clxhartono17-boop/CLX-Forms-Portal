@@ -51,6 +51,17 @@ const ACTIVE_USER_KEY = 'clx_active_user_v4';
 // Staff/Maker accounts MUST be registered by the user
 const INITIAL_OFFICERS: User[] = [
   {
+    id: 'usr_hartono_cso',
+    name: 'Hartono Darmawan',
+    email: 'hartono.darmawan@clx.co.id',
+    password: 'password123',
+    role: 'CSO',
+    division: 'Services',
+    title: 'Chief Service Officer',
+    phone: '0811902123',
+    registeredAt: '2026-10-28T08:05:00Z',
+  },
+  {
     id: 'usr_dimas_cso',
     name: 'Dimas Wicaksono, M.M.',
     email: 'dimas.wicaksono@clx.co.id',
@@ -58,7 +69,7 @@ const INITIAL_OFFICERS: User[] = [
     role: 'CSO',
     division: 'General',
     title: 'Chief Strategy Officer',
-    phone: '0811902123',
+    phone: '0811902124',
     registeredAt: '2026-10-28T08:05:00Z',
   },
   {

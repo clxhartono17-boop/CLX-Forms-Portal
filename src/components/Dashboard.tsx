@@ -191,7 +191,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
           <div className="text-xs font-semibold text-slate-500 uppercase">Total Dokumen</div>
           <div className="text-2xl font-black text-slate-900 mt-1">{metrics.totalDocs}</div>
-          <div className="text-[11px] text-slate-400 mt-0.5">FPU, PFB, dan FPPB</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">FPU, FPP, dan FPPB</div>
         </div>
 
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs col-span-2 lg:col-span-1">
@@ -345,7 +345,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
             >
               <option value="ALL">Semua Jenis (ALL)</option>
               <option value="FPU">FPU (Permohonan Uang)</option>
-              <option value="PFB">PFB (Faktur Biaya)</option>
+              <option value="FPP">FPP (Permohonan Pembayaran)</option>
               <option value="FPPB">FPPB (Pembelian Barang)</option>
             </select>
           </div>
@@ -471,7 +471,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
                   }
 
                   let typeColor = 'bg-blue-50 text-blue-700 border-blue-200';
-                  if (doc.formType === 'PFB') typeColor = 'bg-indigo-50 text-indigo-700 border-indigo-200';
+                  if (doc.formType === 'FPP' || doc.formType === 'PFB') typeColor = 'bg-indigo-50 text-indigo-700 border-indigo-200';
                   if (doc.formType === 'FPPB') typeColor = 'bg-emerald-50 text-emerald-700 border-emerald-200';
 
                   return (

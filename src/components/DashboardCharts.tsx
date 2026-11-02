@@ -55,15 +55,15 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
     };
   }).sort((a, b) => b.amount - a.amount);
 
-  // 2. Form Type Data Breakdown (FPU, PFB, FPPB)
+  // 2. Form Type Data Breakdown (FPU, FPP, FPPB)
   const formTypes: { type: FormType; label: string; desc: string; color: string; fill: string }[] = [
     { type: 'FPU', label: 'FPU (Permohonan Uang)', desc: 'Kas Bon & Uang Muka', color: 'bg-blue-600', fill: '#2563eb' },
-    { type: 'PFB', label: 'PFB (Faktur Biaya)', desc: 'BBM, Tol, & Port Freight', color: 'bg-indigo-600', fill: '#4f46e5' },
+    { type: 'FPP', label: 'FPP (Permohonan Pembayaran)', desc: 'BBM, Tol, Port & Vendor', color: 'bg-indigo-600', fill: '#4f46e5' },
     { type: 'FPPB', label: 'FPPB (Pembelian Barang)', desc: 'Aset & Perlengkapan Gudang', color: 'bg-emerald-600', fill: '#059669' },
   ];
 
   const formTypeStats = formTypes.map(ft => {
-    const matching = forms.filter(f => f.formType === ft.type);
+    const matching = forms.filter(f => f.formType === ft.type || (ft.type === 'FPP' && (f.formType as string) === 'PFB'));
     const amount = matching.reduce((sum, f) => sum + (f.totalAmount || 0), 0);
     const count = matching.length;
     const countPct = Math.round((count / totalCount) * 100);

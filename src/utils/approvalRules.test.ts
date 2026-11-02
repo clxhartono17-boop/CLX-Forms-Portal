@@ -45,8 +45,11 @@ test('Roman numerals conversion and official doc number format', () => {
   assert.equal(toRoman(2026), 'MMXXVI');
 
   const testDate = new Date(2026, 9, 29); // 29 October 2026
-  const docNum = generateDocNumber('FPU', 1, testDate);
-  assert.equal(docNum, 'FPU-0001/CLX/29/X/MMXXVI');
+  const docNumFpu = generateDocNumber('FPU', 1, testDate);
+  assert.equal(docNumFpu, 'FPU-0001/CLX/29/X/MMXXVI');
+
+  const docNumFpp = generateDocNumber('FPP', 2, testDate);
+  assert.equal(docNumFpp, 'FPP-0002/CLX/29/X/MMXXVI');
 });
 
 test('Drive folder path structure matches [NAMA_FORM] / [BULAN] / [TANGGAL] / [NOMOR_FORM]', () => {

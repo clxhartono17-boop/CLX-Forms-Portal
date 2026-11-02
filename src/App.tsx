@@ -3,27 +3,19 @@ import { AuthProvider, useAuth } from './context/AuthContext.tsx';
 import { FormProvider, useForms } from './context/FormContext.tsx';
 import { Navbar } from './components/Navbar.tsx';
 import { Dashboard } from './components/Dashboard.tsx';
+import { StaffMakerDashboard } from './components/StaffMakerDashboard.tsx';
 import { FormCreator } from './components/FormCreator.tsx';
 import { ApprovalQueue } from './components/ApprovalQueue.tsx';
 import { FormDetailsModal } from './components/FormDetailsModal.tsx';
 import { AuthModal } from './components/AuthModal.tsx';
 import { FormDocument } from './types/index.ts';
-import { ShieldAlert, PlusCircle, LogIn } from 'lucide-react';
+import { ShieldCheck, PlusCircle, LogIn, Lock } from 'lucide-react';
 
 function MainApp() {
   const { showAuthModal, setShowAuthModal, currentUser, isCLevel } = useAuth();
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'create' | 'approvals'>('create');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'create' | 'approvals'>('dashboard');
   const [selectedDoc, setSelectedDoc] = useState<FormDocument | null>(null);
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' } | null>(null);
-
-  // Automatically switch tab based on role upon login
-  React.useEffect(() => {
-    if (isCLevel && activeTab === 'create') {
-      setActiveTab('dashboard');
-    } else if (!isCLevel && activeTab === 'dashboard') {
-      setActiveTab('create');
-    }
-  }, [isCLevel]);
 
   const showNotification = (message: string, type: 'success' | 'info' = 'success') => {
     setNotification({ message, type });
@@ -32,11 +24,7 @@ function MainApp() {
 
   const handleFormCreated = (createdDoc: FormDocument) => {
     showNotification(`Form ${createdDoc.docNumber} berhasil dibuat dan otomatis terinput ke "Rekapan Form"!`);
-    if (isCLevel) {
-      setActiveTab('dashboard');
-    } else {
-      setActiveTab('create');
-    }
+    setActiveTab('dashboard');
   };
 
   return (
@@ -66,43 +54,48 @@ function MainApp() {
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {activeTab === 'dashboard' && (
-          isCLevel ? (
-            <Dashboard
-              onSelectDoc={doc => setSelectedDoc(doc)}
-              onCreateNew={() => setActiveTab('create')}
-            />
+          currentUser ? (
+            isCLevel ? (
+              <Dashboard
+                onSelectDoc={doc => setSelectedDoc(doc)}
+                onCreateNew={() => setActiveTab('create')}
+              />
+            ) : (
+              <StaffMakerDashboard
+                onSelectDoc={doc => setSelectedDoc(doc)}
+                onCreateNew={() => setActiveTab('create')}
+              />
+            )
           ) : (
             <div className="max-w-xl mx-auto my-12 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden p-8 text-center animate-in fade-in zoom-in-95">
-              <div className="w-16 h-16 bg-red-50 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-red-200 shadow-xs">
-                <ShieldAlert className="w-8 h-8" />
+              <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-blue-200 shadow-xs">
+                <Lock className="w-8 h-8" />
               </div>
-              <span className="inline-block px-3 py-1 bg-red-100 text-red-900 text-[11px] font-bold uppercase rounded-full mb-2">
-                Hak Akses Dibatasi (C-Level Only)
+              <span className="inline-block px-3 py-1 bg-blue-100 text-blue-900 text-[11px] font-bold uppercase rounded-full mb-2">
+                Portal Otentikasi Karyawan
               </span>
               <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight">
-                Dashboard Hanya Untuk CSO, COO, CFO & CEO
+                Silakan Masuk Untuk Mengakses Dashboard
               </h2>
               <p className="text-xs text-slate-600 mt-2 leading-relaxed max-w-md mx-auto">
-                Ringkasan metrik anggaran, statistik pengeluaran, dan analitik finansial perusahaan CLX hanya dapat diakses oleh jajaran Direksi & C-Level (CSO, COO, CFO, CEO).
+                Masuk dengan akun terdaftar di <em>Master Login</em> untuk memantau status approval pengajuan formulir Anda (Staff/Maker) atau melihat analitik eksekutif (C-Level).
               </p>
 
               <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
                 <button
-                  onClick={() => setActiveTab('create')}
+                  onClick={() => setShowAuthModal(true)}
                   className="w-full sm:w-auto px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm transition flex items-center justify-center space-x-1.5"
                 >
-                  <PlusCircle className="w-4 h-4" />
-                  <span>Buka Form Pembuatan (Create Form)</span>
+                  <LogIn className="w-4 h-4" />
+                  <span>Masuk / Login Akun</span>
                 </button>
-                {!currentUser && (
-                  <button
-                    onClick={() => setShowAuthModal(true)}
-                    className="w-full sm:w-auto px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-lg transition flex items-center justify-center space-x-1.5"
-                  >
-                    <LogIn className="w-4 h-4" />
-                    <span>Masuk Akun Direksi</span>
-                  </button>
-                )}
+                <button
+                  onClick={() => setActiveTab('create')}
+                  className="w-full sm:w-auto px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-lg transition flex items-center justify-center space-x-1.5"
+                >
+                  <PlusCircle className="w-4 h-4" />
+                  <span>Buat Form Baru</span>
+                </button>
               </div>
             </div>
           )
@@ -137,7 +130,7 @@ function MainApp() {
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
           <span>PT. Connectivity Leads eXcellence (CLX) &copy; 2026. All rights reserved.</span>
           <span className="font-mono text-[11px] text-slate-400">
-            FPU • PFB • FPPB Corporate Voucher & Approval System
+            FPU • FPP • FPPB Corporate Voucher & Approval System
           </span>
         </div>
       </footer>

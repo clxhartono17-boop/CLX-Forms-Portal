@@ -231,7 +231,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
           Silakan Login atau Registrasi Terlebih Dahulu
         </h2>
         <p className="text-xs text-slate-600 mt-2 leading-relaxed max-w-md mx-auto">
-          Sesuai SOP internal <strong>PT. Connectivity Leads eXcellence</strong>, sebelum membuat formulir pengajuan (FPU, PFB, FPPB), pengguna diwajibkan memiliki akun terdaftar di <em>Master Login</em> dan masuk ke sistem.
+          Sesuai SOP internal <strong>PT. Connectivity Leads eXcellence</strong>, sebelum membuat formulir pengajuan (FPU, FPP, FPPB), pengguna diwajibkan memiliki akun terdaftar di <em>Master Login</em> dan masuk ke sistem.
         </p>
 
         <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
@@ -326,10 +326,10 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
                   color: 'border-blue-500 bg-blue-50/50 text-blue-900',
                 },
                 {
-                  type: 'PFB' as FormType,
-                  title: 'PFB',
-                  subtitle: 'Permohonan Faktur Biaya',
-                  desc: 'BBM Solar, Biaya Toll, Port Handling, Faktur Pajak',
+                  type: 'FPP' as FormType,
+                  title: 'FPP',
+                  subtitle: 'Form Permohonan Pembayaran',
+                  desc: 'BBM Solar, Biaya Toll, Port Handling, Faktur Pajak, Pembayaran Vendor',
                   color: 'border-indigo-500 bg-indigo-50/50 text-indigo-900',
                 },
                 {

@@ -2,18 +2,14 @@ import React from 'react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { useForms } from '../context/FormContext.tsx';
 import { UserRole } from '../types/index.ts';
-import { SYSTEM_ROLES } from '../utils/authConfig.ts';
 import { 
   FileText, 
   CheckCircle2, 
   PlusCircle, 
-  Cloud, 
   Shield, 
-  Layers, 
-  UserCheck,
-  UserPlus,
-  LogOut,
-  LogIn
+  UserPlus, 
+  LogOut, 
+  LogIn 
 } from 'lucide-react';
 import { GoogleConnectButton } from './GoogleConnectButton.tsx';
 
@@ -29,78 +25,90 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenR
 
   const myPendingCount = currentRole ? pendingCountForUser(currentRole) : 0;
 
+  // Format clean role and title without repetition
+  const getCleanUserSubtitle = () => {
+    if (!currentUser) return '';
+    if (currentUser.role === 'Staff') {
+      return `Staff • Divisi ${currentUser.division || 'Finance'}`;
+    }
+    const title = currentUser.title || currentUser.role;
+    // Prevent repetitive strings like "CSO (Services) (Services)"
+    if (title.toLowerCase().includes(currentUser.division?.toLowerCase() || '')) {
+      return title;
+    }
+    return `${title} • ${currentUser.division || 'CLX'}`;
+  };
+
   return (
-    <header className="bg-slate-900 border-b border-slate-800 text-white sticky top-0 z-40 shadow-md">
+    <header className="bg-slate-900 border-b border-slate-800 text-white sticky top-0 z-40 shadow-lg">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
+        <div className="flex items-center justify-between min-h-[64px] py-2.5 gap-3">
           {/* Brand Logo & Title with official CLX launcher icon */}
           <div 
-            className="flex items-center space-x-3 cursor-pointer select-none" 
-            onClick={() => setActiveTab(isCLevel ? 'dashboard' : 'create')}
+            className="flex items-center space-x-3 cursor-pointer select-none shrink-0" 
+            onClick={() => setActiveTab('dashboard')}
           >
             <img 
               src="/clx_launcher_icon.png" 
               alt="Logo CLX" 
-              className="w-10 h-10 object-contain rounded-lg shadow-md bg-white p-0.5 border border-slate-700 hover:scale-105 transition-transform" 
+              className="w-10 h-10 object-contain rounded-xl shadow-md bg-white p-0.5 border border-slate-700 hover:scale-105 transition-transform" 
             />
             <div>
               <div className="flex items-center space-x-2">
-                <span className="font-bold text-base tracking-tight text-white">
+                <span className="font-black text-sm sm:text-base tracking-tight text-white uppercase">
                   PT. CONNECTIVITY LEADS EXCELLENCE
                 </span>
-                <span className="hidden sm:inline-block text-[11px] font-semibold bg-blue-950 text-blue-300 border border-blue-800 px-2 py-0.5 rounded">
-                  Portal FPU / FPP / FPPB
+                <span className="hidden sm:inline-block text-[10px] font-bold bg-blue-950 text-blue-300 border border-blue-800/80 px-2 py-0.5 rounded-full">
+                  FPU • FPP • FPPB
                 </span>
               </div>
-              <p className="text-xs text-slate-400 hidden sm:block">
-                Financial, Operational & Purchase Requisition Control System
+              <p className="text-[11px] text-slate-400 hidden md:block leading-tight mt-0.5">
+                Financial, Operational & Purchase Control System
               </p>
             </div>
           </div>
 
           {/* Navigation Links */}
-          <nav className="flex items-center space-x-1 sm:space-x-2">
-            {/* Dashboard: Restricted strictly to C-Level (CSO, COO, CFO, CEO) */}
-            {isCLevel && (
-              <button
-                onClick={() => setActiveTab('dashboard')}
-                className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                  activeTab === 'dashboard'
-                    ? 'bg-blue-600 text-white'
-                    : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                }`}
-              >
-                <FileText className="w-4 h-4" />
-                <span>Dashboard</span>
-              </button>
-            )}
-
+          <nav className="flex items-center space-x-1 sm:space-x-2 shrink-0">
+            {/* Dashboard: Available to all users (Staff gets Maker Tracking, C-Level gets Executive Overview) */}
             <button
-              onClick={() => setActiveTab('create')}
-              className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                activeTab === 'create'
-                  ? 'bg-blue-600 text-white'
+              onClick={() => setActiveTab('dashboard')}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                activeTab === 'dashboard'
+                  ? 'bg-blue-600 text-white shadow-xs'
                   : 'text-slate-300 hover:bg-slate-800 hover:text-white'
               }`}
             >
-              <PlusCircle className="w-4 h-4" />
+              <FileText className="w-3.5 h-3.5" />
+              <span>Dashboard</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('create')}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                activeTab === 'create'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+            >
+              <PlusCircle className="w-3.5 h-3.5" />
               <span>Create Form</span>
             </button>
 
-            {/* Pending Approvals (Dedicated C-Level Menu) */}
+            {/* Pending Approvals: For C-Level users */}
             {isCLevel && (
               <button
                 onClick={() => setActiveTab('approvals')}
-                className={`relative flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                className={`relative flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                   activeTab === 'approvals'
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-blue-600 text-white shadow-xs'
                     : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                 }`}
               >
-                <CheckCircle2 className="w-4 h-4" />
+                <CheckCircle2 className="w-3.5 h-3.5" />
                 <span>Pending Approvals</span>
                 {myPendingCount > 0 && (
-                  <span className="ml-1.5 px-2 py-0.5 text-xs font-bold bg-amber-500 text-slate-950 rounded-full animate-pulse shadow-sm">
+                  <span className="ml-1 px-1.5 py-0.2 text-[10px] font-black bg-amber-500 text-slate-950 rounded-full animate-pulse shadow-xs">
                     {myPendingCount}
                   </span>
                 )}
@@ -109,9 +117,9 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenR
           </nav>
 
           {/* User Account / Role & Registration */}
-          <div className="flex items-center space-x-2 sm:space-x-3">
+          <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
             {/* Google Workspace Connection Button */}
-            <div className="hidden sm:block">
+            <div className="hidden lg:block">
               <GoogleConnectButton compact={true} />
             </div>
 
@@ -125,14 +133,18 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenR
                   <span className="hidden sm:inline">+ Daftar User</span>
                 </button>
 
-                <div className="hidden xl:flex flex-col text-right">
-                  <span className="text-xs font-semibold text-slate-200">{currentUser.name}</span>
-                  <span className="text-[11px] text-slate-400">{currentUser.title} ({currentUser.division})</span>
+                <div className="hidden xl:flex flex-col text-right leading-tight">
+                  <span className="text-xs font-bold text-slate-200 max-w-[150px] truncate">
+                    {currentUser.name}
+                  </span>
+                  <span className="text-[10px] text-slate-400 max-w-[150px] truncate">
+                    {getCleanUserSubtitle()}
+                  </span>
                 </div>
 
                 {/* Account Switcher - Only from Master Login registered accounts */}
-                <div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg p-1">
-                  <Shield className="w-3.5 h-3.5 text-blue-400 ml-1.5 mr-1" />
+                <div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg px-2 py-1">
+                  <Shield className="w-3.5 h-3.5 text-blue-400 mr-1.5 shrink-0" />
                   <select
                     aria-label="Akun terdaftar"
                     value={currentUser.id}

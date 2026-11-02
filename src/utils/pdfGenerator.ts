@@ -95,8 +95,8 @@ export async function generateOfficialFormPdf(doc: FormDocument): Promise<PDFDoc
 
   // 2. FORM TITLE BANNER
   let formTitle = 'FORM PERMOHONAN UANG (FPU)';
-  if (doc.formType === 'PFB') {
-    formTitle = 'PERMOHONAN FAKTUR BIAYA & OPERASIONAL (PFB)';
+  if (doc.formType === 'FPP' || doc.formType === 'PFB') {
+    formTitle = 'FORM PERMOHONAN PEMBAYARAN (FPP)';
   } else if (doc.formType === 'FPPB') {
     formTitle = 'FORM PERMOHONAN PEMBELIAN BARANG (FPPB)';
   }
