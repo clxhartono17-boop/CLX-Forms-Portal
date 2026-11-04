@@ -4,7 +4,15 @@ import { useAuth } from '../context/AuthContext.tsx';
 import { FormDocument, FormType, Division, ApprovalStatus } from '../types/index.ts';
 import { formatRupiah, generateOfficialFormPdf, generateMergedPdf, downloadPdf } from '../utils/pdfGenerator.ts';
 import { GOOGLE_SHEETS_TEMPLATE_URL, GOOGLE_DRIVE_PARENT_FOLDER_ID, SHEET_TAB_REKAPAN_FORM } from '../utils/googleIntegration.ts';
-import { syncAllDataToGoogleSheets, SPREADSHEET_URL, copyFormsToClipboard, downloadFormsCsv, isAutoSyncConfigured } from '../utils/googleWorkspace.ts';
+import { 
+  syncAllDataToGoogleSheets, 
+  syncFormsToSpreadsheet,
+  syncFormsToWebhook,
+  SPREADSHEET_URL, 
+  copyFormsToClipboard, 
+  downloadFormsCsv, 
+  isAutoSyncConfigured 
+} from '../utils/googleWorkspace.ts';
 import { GoogleAutoSyncModal } from './GoogleAutoSyncModal.tsx';
 import { DashboardCharts } from './DashboardCharts.tsx';
 import { 
@@ -27,7 +35,8 @@ import {
   Layers,
   Copy,
   Check,
-  Zap
+  Zap,
+  Sparkles
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -56,28 +65,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
   };
 
   const handleSyncAll = async () => {
-    let token = googleToken;
-    if (!token) {
-      try {
-        token = await connectGoogle();
-      } catch (err: any) {
-        setSyncFeedback(err?.message || 'Gagal menghubungkan akun Google.');
-        setTimeout(() => setSyncFeedback(null), 4000);
-        return;
-      }
-    }
-
-    if (!token) return;
-
     setIsSyncingSheets(true);
-    setSyncFeedback('Sedang menyinkronkan data ke spreadsheet Rekap Form CLX...');
+    setSyncFeedback('Sedang menyinkronkan seluruh formulir ke Google Spreadsheet Rekap Form CLX...');
     try {
-      const res = await syncAllDataToGoogleSheets(forms, registeredUsers, token);
-      setSyncFeedback(
-        `Berhasil! ${res.formsCount} formulir masuk ke tab "${res.sheetTitle}" (mulai baris 9, kolom B-T) & ${res.usersCount} user ke tab "Master Login"!`
-      );
+      // 1. Try sync via Apps Script Webhook or active Google token
+      const res = await syncFormsToSpreadsheet(forms, registeredUsers, googleToken);
+      if (res.method === 'clipboard') {
+        setCopiedB9(true);
+        setSyncFeedback(`✅ ${res.message}`);
+        setTimeout(() => setCopiedB9(false), 5000);
+        // Also open setup modal if auto-sync is not yet configured
+        if (!autoSyncOn) {
+          setShowAutoSyncModal(true);
+        }
+      } else {
+        setSyncFeedback(`✅ ${res.message}`);
+      }
     } catch (err: any) {
-      setSyncFeedback(`Gagal sinkronisasi: ${err?.message || 'Periksa koneksi'}`);
+      setSyncFeedback(`Catatan sinkronisasi: ${err?.message || 'Periksa koneksi'}`);
     } finally {
       setIsSyncingSheets(false);
       setTimeout(() => setSyncFeedback(null), 8000);
@@ -169,7 +174,69 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full">
+      {/* Synchronization Alert Banner: Connects Web Vercel with Google Sheet */}
+      {forms.length > 0 && (
+        <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-indigo-950 text-white rounded-2xl p-4 sm:p-5 shadow-lg border border-blue-700/60 flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4">
+          <div className="flex items-start space-x-3.5">
+            <div className="w-10 h-10 rounded-xl bg-blue-500/20 border border-blue-400/40 text-amber-300 flex items-center justify-center shrink-0 mt-0.5">
+              <Zap className="w-5 h-5 fill-current" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-black text-sm uppercase tracking-wide text-white">
+                  Sinkronisasi Spreadsheet Rekap Form CLX ({forms.length} Dokumen Tersedia)
+                </span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                  autoSyncOn 
+                    ? 'bg-emerald-400/20 text-emerald-300 border border-emerald-400/40' 
+                    : 'bg-amber-400/20 text-amber-300 border border-amber-400/40'
+                }`}>
+                  {autoSyncOn ? '🟢 Auto-Sync Webhook Siap' : '⚪ Webhook Belum Diisi'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-1 max-w-3xl leading-relaxed">
+                Pastikan transaksi di portal web sama dengan spreadsheet <strong>Rekap Form CLX (gid=0)</strong> pada baris 9 (Kolom B sampai T).
+                Klik <strong>⚡ Sinkronkan Sekarang</strong> untuk mengirim otomatis, atau <strong>📋 Salin (Paste B9)</strong> untuk tempel instan tanpa login.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0 w-full xl:w-auto">
+            <button
+              onClick={handleSyncAll}
+              disabled={isSyncingSheets}
+              className="flex-1 sm:flex-initial inline-flex items-center justify-center space-x-1.5 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-md transition disabled:opacity-50"
+            >
+              {isSyncingSheets ? (
+                <RefreshCw className="w-4 h-4 animate-spin text-white" />
+              ) : (
+                <Zap className="w-4 h-4 text-amber-300 fill-current" />
+              )}
+              <span>{isSyncingSheets ? 'Menyinkronkan...' : `⚡ Sinkronkan ${forms.length} Data ke Spreadsheet`}</span>
+            </button>
+
+            <button
+              onClick={handleCopyB9}
+              className="flex-1 sm:flex-initial inline-flex items-center justify-center space-x-1.5 px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-md transition"
+            >
+              {copiedB9 ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+              <span>{copiedB9 ? 'Tersalin!' : '📋 Salin Data (Paste ke B9)'}</span>
+            </button>
+
+            <a
+              href={SPREADSHEET_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center justify-center space-x-1 px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs rounded-xl transition"
+            >
+              <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+              <span className="hidden sm:inline">Buka Sheet</span>
+            </a>
+          </div>
+        </div>
+      )}
+
       {/* KPI Cards Row */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">

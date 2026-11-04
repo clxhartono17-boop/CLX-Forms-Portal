@@ -45,8 +45,8 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenR
   };
 
   return (
-    <header className="bg-slate-900 border-b border-slate-800 text-white sticky top-0 z-40 shadow-lg">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <header className="bg-slate-900 border-b border-slate-800 text-white sticky top-0 z-40 shadow-lg w-full">
+      <div className="w-full max-w-[1720px] 2xl:max-w-[1850px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10">
         <div className="flex items-center justify-between min-h-[64px] py-2.5 gap-3">
           {/* Brand Logo & Title with official CLX launcher icon */}
           <div 

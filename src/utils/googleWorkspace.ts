@@ -683,6 +683,64 @@ export async function syncAllDataToGoogleSheets(
 
       var sheetForms = ss.getSheetByName("Rekap Form CLX") || ss.getSheets()[0];
 
+      // 0. Action: Batch Sync (Sinkronkan Semua Transaksi Sekaligus)
+      if (data.action === "batch_sync" || data.action === "sync_all" || (data.rows && Array.isArray(data.rows) && data.rows.length > 0)) {
+        var rows = data.rows || [];
+        if ((!rows || rows.length === 0) && data.forms && Array.isArray(data.forms)) {
+          rows = data.forms.map(function(doc, idx) {
+            return [
+              idx + 1,
+              doc.formType || "FPP",
+              doc.docNumber || "-",
+              doc.date || "",
+              doc.neededDate || doc.date || "",
+              doc.division || "Finance",
+              doc.requesterName || "",
+              doc.purpose || "",
+              doc.subtotalAmount || doc.totalAmount || 0,
+              doc.taxAmount || 0,
+              doc.totalAmount || 0,
+              doc.paymentMethod || "Bank Transfer",
+              (doc.bankName || "BCA") + " - " + (doc.bankAccountNo || "-") + " (a.n " + (doc.bankAccountName || "-") + ")",
+              doc.settlementEstimate || (doc.formType === "FPU" ? "H+7 Setelah Realisasi" : "-"),
+              doc.totalAmount > 10000000 ? "Maker -> CSO -> COO -> CFO -> CEO (Wajib CEO)" : "Maker -> CSO -> COO -> CFO (Selesai di CFO)",
+              doc.status || "Pending Approval",
+              doc.formType === "FPU" ? "Kas Bon Aktif" : "-",
+              doc.notes || "-",
+              doc.googleDrive ? (doc.googleDrive.webViewLink || doc.googleDrive.fileUrl || "-") : "-"
+            ];
+          });
+        }
+
+        if (rows.length > 0) {
+          // Cari baris pertama yang kosong di bawah Row 8 (header 'No')
+          var colBValues = sheetForms.getRange("B8:B1000").getValues();
+          var count = 0;
+          for (var i = 1; i < colBValues.length; i++) {
+            if (colBValues[i][0] !== "" && colBValues[i][0] !== null) {
+              count++;
+            }
+          }
+          var startRow = 9 + count;
+          
+          // Beri nomor urut berurutan
+          for (var k = 0; k < rows.length; k++) {
+            rows[k][0] = count + k + 1;
+          }
+
+          // Tulis semua baris sekaligus ke Kolom B sampai Kolom T (19 Kolom)
+          sheetForms.getRange(startRow, 2, rows.length, rows[0].length).setValues(rows);
+
+          return ContentService.createTextOutput(JSON.stringify({
+            status: "success",
+            message: rows.length + " formulir berhasil dimasukkan ke spreadsheet Rekap Form CLX!",
+            count: rows.length,
+            startRow: startRow,
+            sheetTitle: sheetForms.getName()
+          })).setMimeType(ContentService.MimeType.JSON);
+        }
+      }
+
       // 1. Action: Append Form Baru
       if (data.action === "append_form" || data.form) {
         var row = data.row;
@@ -985,4 +1043,102 @@ export async function syncAllDataToGoogleSheets(
 
     return false;
   }
+
+  /**
+   * Bulk sync forms and users via Google Apps Script Webhook.
+   * Zero login required - works directly from Vercel without OAuth origin mismatch.
+   */
+  export async function syncFormsToWebhook(
+    forms: FormDocument[],
+    users?: User[]
+  ): Promise<{ success: boolean; count: number; error?: string }> {
+    if (!isAutoSyncConfigured()) {
+      return { success: false, count: 0, error: 'URL Webhook Google Apps Script belum disetel.' };
+    }
+
+    const rows = forms.map((doc, idx) => formatFormRow(doc, idx + 1));
+
+    try {
+      // 1. Try batch sync first
+      const batchRes = await sendToAppsScriptWebhook({
+        action: 'batch_sync',
+        forms,
+        rows,
+        users,
+      });
+
+      if (batchRes.success) {
+        return { success: true, count: forms.length };
+      }
+    } catch (err) {
+      console.warn('Batch webhook note, falling back to sequential sync:', err);
+    }
+
+    // 2. Sequential fallback
+    let sent = 0;
+    for (let i = 0; i < forms.length; i++) {
+      const single = await sendToAppsScriptWebhook({
+        action: 'append_form',
+        form: forms[i],
+        row: rows[i],
+      });
+      if (single.success) sent++;
+    }
+
+    return { success: sent > 0, count: sent };
+  }
+
+  /**
+   * Universal synchronization for all forms:
+   * 1. Webhook (primary, zero auth required)
+   * 2. Sheets API (if Google OAuth token exists)
+   * 3. Clipboard fallback (1-click copy TSV to paste in B9)
+   */
+  export async function syncFormsToSpreadsheet(
+    forms: FormDocument[],
+    users: User[],
+    token?: string | null
+  ): Promise<{ success: boolean; method: 'webhook' | 'oauth' | 'clipboard'; count: number; message: string }> {
+    // Method 1: Webhook
+    if (isAutoSyncConfigured()) {
+      const webRes = await syncFormsToWebhook(forms, users);
+      if (webRes.success) {
+        return {
+          success: true,
+          method: 'webhook',
+          count: webRes.count,
+          message: `Berhasil! ${webRes.count} transaksi langsung tersinkronisasi ke Google Spreadsheet Rekap Form CLX via Webhook!`,
+        };
+      }
+    }
+
+    // Method 2: OAuth token if active
+    if (token) {
+      try {
+        const sheetsRes = await syncAllDataToGoogleSheets(forms, users, token);
+        if (sheetsRes.formsCount > 0) {
+          return {
+            success: true,
+            method: 'oauth',
+            count: sheetsRes.formsCount,
+            message: `Berhasil! ${sheetsRes.formsCount} formulir masuk ke tab "${sheetsRes.sheetTitle}" (baris 9+) & ${sheetsRes.usersCount} user ke "Master Login"!`,
+          };
+        }
+      } catch (err: any) {
+        console.warn('Sheets API sync error:', err);
+      }
+    }
+
+    // Method 3: Clipboard
+    const copied = await copyFormsToClipboard(forms);
+    return {
+      success: copied,
+      method: 'clipboard',
+      count: forms.length,
+      message: copied
+        ? `📋 Data ${forms.length} formulir berhasil disalin ke clipboard! Buka Google Sheet dan Paste di sel B9.`
+        : 'Gagal menyinkronkan data.',
+    };
+  }
+
 

@@ -11,7 +11,8 @@ import {
   RefreshCw,
   Code,
   ShieldCheck,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Send
 } from 'lucide-react';
 import { 
   SPREADSHEET_URL, 
@@ -19,8 +20,12 @@ import {
   getAppsScriptUrl, 
   setAppsScriptUrl, 
   isAutoSyncConfigured,
-  sendToAppsScriptWebhook
+  sendToAppsScriptWebhook,
+  syncFormsToWebhook,
+  copyFormsToClipboard
 } from '../utils/googleWorkspace.ts';
+import { useForms } from '../context/FormContext.tsx';
+import { useAuth } from '../context/AuthContext.tsx';
 
 interface GoogleAutoSyncModalProps {
   isOpen: boolean;
@@ -33,9 +38,13 @@ export const GoogleAutoSyncModal: React.FC<GoogleAutoSyncModalProps> = ({
   onClose,
   onSuccess,
 }) => {
+  const { forms } = useForms();
+  const { registeredUsers } = useAuth();
   const [urlInput, setUrlInput] = useState('');
   const [copiedCode, setCopiedCode] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
+  const [isSyncingExisting, setIsSyncingExisting] = useState(false);
+  const [copiedExistingB9, setCopiedExistingB9] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [activeStep, setActiveStep] = useState<number>(1);
 
@@ -45,6 +54,51 @@ export const GoogleAutoSyncModal: React.FC<GoogleAutoSyncModalProps> = ({
       setTestResult(null);
     }
   }, [isOpen]);
+
+  const handleSyncExistingForms = async () => {
+    if (!isAutoSyncConfigured()) {
+      setTestResult({
+        success: false,
+        message: 'Simpan URL Webhook terlebih dahulu sebelum menyinkronkan data.',
+      });
+      return;
+    }
+
+    setIsSyncingExisting(true);
+    try {
+      const res = await syncFormsToWebhook(forms, registeredUsers);
+      if (res.success) {
+        setTestResult({
+          success: true,
+          message: `🎉 Berhasil! ${res.count} formulir yang ada di web sudah dikirim dan langsung masuk ke Google Sheet Rekap Form CLX!`,
+        });
+      } else {
+        setTestResult({
+          success: false,
+          message: `Gagal mengirim: ${res.error || 'Periksa koneksi webhook'}`,
+        });
+      }
+    } catch (err: any) {
+      setTestResult({
+        success: false,
+        message: `Error: ${err?.message || 'Gagal sinkronisasi'}`,
+      });
+    } finally {
+      setIsSyncingExisting(false);
+    }
+  };
+
+  const handleCopyExistingB9 = async () => {
+    const ok = await copyFormsToClipboard(forms);
+    if (ok) {
+      setCopiedExistingB9(true);
+      setTimeout(() => setCopiedExistingB9(false), 4000);
+      setTestResult({
+        success: true,
+        message: `📋 Data ${forms.length} formulir berhasil disalin ke clipboard! Langsung buka Google Sheet, klik B9, dan tekan Ctrl+V.`,
+      });
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -306,6 +360,42 @@ export const GoogleAutoSyncModal: React.FC<GoogleAutoSyncModalProps> = ({
                   <AlertCircle className="w-4 h-4 text-red-700 shrink-0 mt-0.5" />
                 )}
                 <span className="leading-relaxed">{testResult.message}</span>
+              </div>
+            )}
+
+            {/* Quick Bulk Sync Actions for Existing Forms */}
+            {forms.length > 0 && (
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2 mt-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-[11px] text-slate-800">
+                    Kirim {forms.length} Formulir yang Ada di Web ke Spreadsheet:
+                  </span>
+                  <span className="text-[10px] text-slate-500">
+                    Total: {forms.length} dokumen terdaftar
+                  </span>
+                </div>
+                <div className="flex flex-col sm:flex-row items-center gap-2">
+                  <button
+                    onClick={handleSyncExistingForms}
+                    disabled={isSyncingExisting || !urlInput.trim()}
+                    className="w-full sm:flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-lg transition shadow-xs flex items-center justify-center space-x-1.5 disabled:opacity-50"
+                  >
+                    {isSyncingExisting ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Send className="w-3.5 h-3.5" />
+                    )}
+                    <span>{isSyncingExisting ? 'Mengirim Data...' : `⚡ Kirim Semua (${forms.length} Data) via Webhook`}</span>
+                  </button>
+
+                  <button
+                    onClick={handleCopyExistingB9}
+                    className="w-full sm:w-auto py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg transition shadow-xs flex items-center justify-center space-x-1.5"
+                  >
+                    {copiedExistingB9 ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedExistingB9 ? 'Tersalin ke Clipboard!' : '📋 Salin Format (Paste B9)'}</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>

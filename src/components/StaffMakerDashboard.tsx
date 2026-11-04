@@ -5,7 +5,15 @@ import { FormDocument, FormType, ApprovalStatus } from '../types/index.ts';
 import { formatRupiah, generateMergedPdf, downloadPdf } from '../utils/pdfGenerator.ts';
 import { requiresCeoApproval } from '../utils/approvalRules.ts';
 import { GOOGLE_SHEETS_TEMPLATE_URL, GOOGLE_DRIVE_PARENT_FOLDER_ID } from '../utils/googleIntegration.ts';
-import { syncAllDataToGoogleSheets, SPREADSHEET_URL, copyFormsToClipboard, downloadFormsCsv } from '../utils/googleWorkspace.ts';
+import { 
+  syncAllDataToGoogleSheets, 
+  syncFormsToSpreadsheet,
+  syncFormsToWebhook,
+  SPREADSHEET_URL, 
+  copyFormsToClipboard, 
+  downloadFormsCsv, 
+  isAutoSyncConfigured 
+} from '../utils/googleWorkspace.ts';
 import { 
   FileText, 
   Clock, 
@@ -31,7 +39,6 @@ import {
   FileSpreadsheet,
   Zap
 } from 'lucide-react';
-import { isAutoSyncConfigured } from '../utils/googleWorkspace.ts';
 import { GoogleAutoSyncModal } from './GoogleAutoSyncModal.tsx';
 
 interface StaffMakerDashboardProps {
@@ -63,28 +70,22 @@ export const StaffMakerDashboard: React.FC<StaffMakerDashboardProps> = ({
   };
 
   const handleSyncAll = async () => {
-    let token = googleToken;
-    if (!token) {
-      try {
-        token = await connectGoogle();
-      } catch (err: any) {
-        setSyncFeedback(err?.message || 'Gagal menghubungkan akun Google.');
-        setTimeout(() => setSyncFeedback(null), 4000);
-        return;
-      }
-    }
-
-    if (!token) return;
-
     setIsSyncingSheets(true);
-    setSyncFeedback('Sedang menyinkronkan formulir & master login ke Google Sheet...');
+    setSyncFeedback('Sedang menyinkronkan seluruh formulir ke Google Spreadsheet Rekap Form CLX...');
     try {
-      const res = await syncAllDataToGoogleSheets(forms, registeredUsers, token);
-      setSyncFeedback(
-        `Berhasil! ${res.formsCount} formulir masuk ke tab "${res.sheetTitle}" (mulai baris 9, kolom B-T) & ${res.usersCount} user ke tab "Master Login"!`
-      );
+      const res = await syncFormsToSpreadsheet(forms, registeredUsers, googleToken);
+      if (res.method === 'clipboard') {
+        setCopiedB9(true);
+        setSyncFeedback(`✅ ${res.message}`);
+        setTimeout(() => setCopiedB9(false), 5000);
+        if (!autoSyncOn) {
+          setShowAutoSyncModal(true);
+        }
+      } else {
+        setSyncFeedback(`✅ ${res.message}`);
+      }
     } catch (err: any) {
-      setSyncFeedback(`Gagal sinkronisasi: ${err?.message || 'Periksa koneksi'}`);
+      setSyncFeedback(`Catatan sinkronisasi: ${err?.message || 'Periksa koneksi'}`);
     } finally {
       setIsSyncingSheets(false);
       setTimeout(() => setSyncFeedback(null), 8000);
