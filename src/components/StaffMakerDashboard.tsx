@@ -28,8 +28,11 @@ import {
   RefreshCw,
   Copy,
   Check,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Zap
 } from 'lucide-react';
+import { isAutoSyncConfigured } from '../utils/googleWorkspace.ts';
+import { GoogleAutoSyncModal } from './GoogleAutoSyncModal.tsx';
 
 interface StaffMakerDashboardProps {
   onSelectDoc: (doc: FormDocument) => void;
@@ -46,6 +49,8 @@ export const StaffMakerDashboard: React.FC<StaffMakerDashboardProps> = ({
   const [isSyncingSheets, setIsSyncingSheets] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
   const [copiedB9, setCopiedB9] = useState(false);
+  const [showAutoSyncModal, setShowAutoSyncModal] = useState(false);
+  const autoSyncOn = isAutoSyncConfigured();
 
   const handleCopyB9 = async () => {
     const ok = await copyFormsToClipboard(forms);
@@ -223,6 +228,19 @@ export const StaffMakerDashboard: React.FC<StaffMakerDashboardProps> = ({
 
           <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto shrink-0">
             <button
+              onClick={() => setShowAutoSyncModal(true)}
+              title="Setup Webhook Google Apps Script agar formulir dari Vercel otomatis masuk ke spreadsheet tanpa login"
+              className={`inline-flex items-center space-x-1 px-3 py-2 rounded-lg text-xs font-bold transition shadow-2xs ${
+                autoSyncOn
+                  ? 'bg-emerald-700 hover:bg-emerald-800 text-white'
+                  : 'bg-amber-500 hover:bg-amber-600 text-slate-950'
+              }`}
+            >
+              <Zap className="w-3.5 h-3.5 fill-current" />
+              <span>{autoSyncOn ? '⚡ Auto-Sync Aktif' : '⚡ Setup Auto-Sync'}</span>
+            </button>
+
+            <button
               onClick={handleCopyB9}
               title="Salin baris form secara langsung untuk dipaste ke sel B9 Google Sheet (tanpa perlu otorisasi Google)"
               className="inline-flex items-center justify-center space-x-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs transition"
@@ -263,6 +281,11 @@ export const StaffMakerDashboard: React.FC<StaffMakerDashboardProps> = ({
               <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
             </a>
           </div>
+
+          <GoogleAutoSyncModal
+            isOpen={showAutoSyncModal}
+            onClose={() => setShowAutoSyncModal(false)}
+          />
         </div>
 
         {/* Sync Feedback Message */}

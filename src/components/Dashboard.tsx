@@ -4,7 +4,8 @@ import { useAuth } from '../context/AuthContext.tsx';
 import { FormDocument, FormType, Division, ApprovalStatus } from '../types/index.ts';
 import { formatRupiah, generateOfficialFormPdf, generateMergedPdf, downloadPdf } from '../utils/pdfGenerator.ts';
 import { GOOGLE_SHEETS_TEMPLATE_URL, GOOGLE_DRIVE_PARENT_FOLDER_ID, SHEET_TAB_REKAPAN_FORM } from '../utils/googleIntegration.ts';
-import { syncAllDataToGoogleSheets, SPREADSHEET_URL, copyFormsToClipboard, downloadFormsCsv } from '../utils/googleWorkspace.ts';
+import { syncAllDataToGoogleSheets, SPREADSHEET_URL, copyFormsToClipboard, downloadFormsCsv, isAutoSyncConfigured } from '../utils/googleWorkspace.ts';
+import { GoogleAutoSyncModal } from './GoogleAutoSyncModal.tsx';
 import { DashboardCharts } from './DashboardCharts.tsx';
 import { 
   Search, 
@@ -25,7 +26,8 @@ import {
   RefreshCw,
   Layers,
   Copy,
-  Check
+  Check,
+  Zap
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -40,6 +42,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
   const [isSyncingSheets, setIsSyncingSheets] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
   const [copiedB9, setCopiedB9] = useState(false);
+  const [showAutoSyncModal, setShowAutoSyncModal] = useState(false);
+  const autoSyncOn = isAutoSyncConfigured();
 
   const handleCopyB9 = async () => {
     const ok = await copyFormsToClipboard(filteredForms);
@@ -235,6 +239,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
 
           <div className="flex flex-wrap items-center gap-2">
             <button
+              onClick={() => setShowAutoSyncModal(true)}
+              title="Setup Webhook Google Apps Script agar formulir dari Vercel otomatis masuk ke spreadsheet tanpa login"
+              className={`inline-flex items-center space-x-1 px-3 py-2 rounded-lg text-xs font-bold transition shadow-2xs ${
+                autoSyncOn
+                  ? 'bg-emerald-700 hover:bg-emerald-800 text-white'
+                  : 'bg-amber-500 hover:bg-amber-600 text-slate-950'
+              }`}
+            >
+              <Zap className="w-3.5 h-3.5 fill-current" />
+              <span>{autoSyncOn ? '⚡ Auto-Sync Aktif' : '⚡ Setup Auto-Sync'}</span>
+            </button>
+
+            <button
               onClick={handleCopyB9}
               title="Salin baris form secara langsung untuk dipaste ke sel B9 Google Sheet (tanpa perlu otorisasi Google)"
               className="inline-flex items-center space-x-1 px-3 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition shadow-2xs"
@@ -282,6 +299,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
             </button>
           </div>
         </div>
+
+        <GoogleAutoSyncModal
+          isOpen={showAutoSyncModal}
+          onClose={() => setShowAutoSyncModal(false)}
+        />
 
         {syncFeedback && (
           <div className="p-2.5 bg-blue-50 border border-blue-200 text-blue-900 text-xs rounded-lg flex items-center justify-between">

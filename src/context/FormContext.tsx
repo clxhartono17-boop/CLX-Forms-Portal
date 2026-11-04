@@ -4,7 +4,12 @@ import { INITIAL_FORMS } from '../data/mockData.ts';
 import { syncToGoogleDrive, syncToGoogleSheets } from '../utils/googleIntegration.ts';
 import { generateMergedPdf } from '../utils/pdfGenerator.ts';
 import { getNextApprovalStep, requiresCeoApproval } from '../utils/approvalRules.ts';
-import { appendFormToGoogleSheets, getGoogleAccessToken } from '../utils/googleWorkspace.ts';
+import { 
+  appendFormToGoogleSheets, 
+  getGoogleAccessToken, 
+  autoSyncFormToGoogleSheet, 
+  autoSyncStatusToGoogleSheet 
+} from '../utils/googleWorkspace.ts';
 
 interface FormContextType {
   forms: FormDocument[];
@@ -58,18 +63,12 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let updatedDoc = { ...newDoc };
 
     try {
-      // 1. Automatically record to Google Sheet at gid=0
-      const googleToken = getGoogleAccessToken();
-      let sheetsSuccess = false;
-      let targetRowNumber: number | undefined;
-      let targetSheetName = 'Rekap Form CLX';
-
-      if (googleToken) {
-        const sheetsRes = await appendFormToGoogleSheets(updatedDoc, googleToken);
-        sheetsSuccess = sheetsRes.success;
-        targetRowNumber = sheetsRes.rowNumber;
-        targetSheetName = sheetsRes.sheetTitle || targetSheetName;
-      }
+      // 1. Automatically record to Google Sheet at gid=0 (Webhook / OAuth / Proxy)
+      const autoRes = await autoSyncFormToGoogleSheet(updatedDoc, forms.length + 1);
+      
+      let sheetsSuccess = autoRes.synced;
+      let targetRowNumber = autoRes.rowNumber;
+      let targetSheetName = autoRes.sheetTitle || 'Rekap Form CLX';
 
       try {
         await syncToGoogleSheets(updatedDoc);
@@ -84,7 +83,7 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
         syncedAt: sheetsSuccess ? new Date().toISOString() : undefined,
       };
     } catch (err) {
-      console.warn('Google sync notice on creation:', err);
+      console.warn('Google auto-sync notice on creation:', err);
     }
 
     setForms(prev => [updatedDoc, ...prev]);
@@ -159,8 +158,9 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Update state
     updateForm(updatedDoc);
 
-    // Record status update to Google Sheets "Rekapan Form"
+    // Record status update to Google Sheets "Rekap Form CLX"
     try {
+      await autoSyncStatusToGoogleSheet(updatedDoc);
       await syncToGoogleSheets(updatedDoc);
     } catch (err) {
       console.warn('Sheets update notice:', err);

@@ -90,6 +90,36 @@ app.post('/api/google/sheets-sync', async (req, res) => {
   }
 });
 
+// 2b. POST: Forward payload to Google Apps Script Webhook (Server-side proxy)
+app.post('/api/google/webhook-sync', async (req, res) => {
+  try {
+    const { url, payload } = req.body;
+    const targetUrl = url || process.env.VITE_APPS_SCRIPT_URL;
+    if (!targetUrl) {
+      return res.status(400).json({ success: false, error: 'Target Apps Script Webhook URL is required' });
+    }
+
+    const response = await fetch(targetUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+    });
+
+    const responseText = await response.text();
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      data = { raw: responseText };
+    }
+
+    return res.json({ success: true, data });
+  } catch (err: any) {
+    console.error('Error in webhook-sync proxy:', err.message || err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // 3. GET: Ambil Data Master Login (Read)
 app.get('/api/google/users', async (_req, res) => {
   try {

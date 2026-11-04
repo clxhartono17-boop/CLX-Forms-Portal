@@ -9,9 +9,12 @@ import {
   Shield, 
   UserPlus, 
   LogOut, 
-  LogIn 
+  LogIn,
+  Zap
 } from 'lucide-react';
 import { GoogleConnectButton } from './GoogleConnectButton.tsx';
+import { GoogleAutoSyncModal } from './GoogleAutoSyncModal.tsx';
+import { isAutoSyncConfigured } from '../utils/googleWorkspace.ts';
 
 interface NavbarProps {
   activeTab: 'dashboard' | 'create' | 'approvals';
@@ -24,6 +27,8 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenR
   const { pendingCountForUser } = useForms();
 
   const myPendingCount = currentRole ? pendingCountForUser(currentRole) : 0;
+  const [showAutoSyncModal, setShowAutoSyncModal] = React.useState(false);
+  const autoSyncOn = isAutoSyncConfigured();
 
   // Format clean role and title without repetition
   const getCleanUserSubtitle = () => {
@@ -118,10 +123,30 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenR
 
           {/* User Account / Role & Registration */}
           <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
-            {/* Google Workspace Connection Button */}
-            <div className="flex items-center">
+            {/* Google Workspace Connection & Auto-Sync Webhook */}
+            <div className="flex items-center space-x-1.5">
+              <button
+                onClick={() => setShowAutoSyncModal(true)}
+                title="Konfigurasi Auto-Sync Google Sheets otomatis tanpa login (khusus portal Vercel)"
+                className={`inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs font-bold transition shadow-2xs border ${
+                  autoSyncOn
+                    ? 'bg-emerald-950/90 border-emerald-500/80 text-emerald-300 hover:bg-emerald-900'
+                    : 'bg-blue-950/80 border-blue-600/70 text-blue-300 hover:bg-blue-900'
+                }`}
+              >
+                <Zap className={`w-3.5 h-3.5 ${autoSyncOn ? 'text-emerald-400' : 'text-amber-400'}`} />
+                <span className="hidden sm:inline">
+                  {autoSyncOn ? 'Auto-Sync Aktif' : '⚡ Auto-Sync Sheet'}
+                </span>
+              </button>
+
               <GoogleConnectButton compact={true} />
             </div>
+
+            <GoogleAutoSyncModal
+              isOpen={showAutoSyncModal}
+              onClose={() => setShowAutoSyncModal(false)}
+            />
 
             {currentUser ? (
               <>

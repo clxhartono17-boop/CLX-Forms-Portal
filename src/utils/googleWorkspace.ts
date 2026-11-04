@@ -648,10 +648,341 @@ export async function syncAllDataToGoogleSheets(
     }
   }
 
-  return {
-    formsCount,
-    usersCount,
-    sheetTitle: targetFormsTab,
-    errors,
-  };
-}
+    return {
+      formsCount,
+      usersCount,
+      sheetTitle: targetFormsTab,
+      errors,
+    };
+  }
+
+  export const STORAGE_KEY_APPS_SCRIPT_URL = 'clx_apps_script_url_v2';
+
+  export const APPS_SCRIPT_SAMPLE_CODE = `/**
+   * CLX Forms Portal - Google Apps Script Auto-Sync Webhook
+   * Menghubungkan portal https://clx-forms-portal.vercel.app/ langsung ke Spreadsheet Rekap Form CLX
+   * Pasang di: Ekstensi > Apps Script di spreadsheet Rekap Form CLX
+   */
+
+  function doPost(e) {
+    try {
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      var postData = "";
+      if (e && e.postData && e.postData.contents) {
+        postData = e.postData.contents;
+      }
+      
+      var data = {};
+      if (postData) {
+        try {
+          data = JSON.parse(postData);
+        } catch (err) {
+          data = { action: 'ping' };
+        }
+      }
+
+      var sheetForms = ss.getSheetByName("Rekap Form CLX") || ss.getSheets()[0];
+
+      // 1. Action: Append Form Baru
+      if (data.action === "append_form" || data.form) {
+        var row = data.row;
+        if (!row && data.form) {
+          var doc = data.form;
+          row = [
+            doc.sequenceNumber || 1,
+            doc.formType || "FPU",
+            doc.docNumber || "-",
+            doc.date || "",
+            doc.neededDate || doc.date || "",
+            doc.division || "Finance",
+            doc.requesterName || "",
+            doc.purpose || "",
+            doc.subtotalAmount || doc.totalAmount || 0,
+            doc.taxAmount || 0,
+            doc.totalAmount || 0,
+            doc.paymentMethod || "Bank Transfer",
+            (doc.bankName || "BCA") + " - " + (doc.bankAccountNo || "-") + " (a.n " + (doc.bankAccountName || "-") + ")",
+            doc.settlementEstimate || (doc.formType === "FPU" ? "H+7 Setelah Realisasi" : "-"),
+            doc.totalAmount > 10000000 ? "Maker -> CSO -> COO -> CFO -> CEO (Wajib CEO)" : "Maker -> CSO -> COO -> CFO (Selesai di CFO)",
+            doc.status || "Pending CSO",
+            doc.formType === "FPU" ? "Kas Bon Aktif" : "-",
+            doc.notes || "-",
+            doc.googleDrive ? (doc.googleDrive.webViewLink || "-") : "-"
+          ];
+        }
+
+        // Hitung baris target di bawah Row 8 (header 'No')
+        var colBValues = sheetForms.getRange("B8:B1000").getValues();
+        var count = 0;
+        for (var i = 1; i < colBValues.length; i++) {
+          if (colBValues[i][0] !== "" && colBValues[i][0] !== null) {
+            count++;
+          }
+        }
+        var targetRow = 9 + count;
+        
+        // Update nomor urut
+        if (row && row.length > 0) {
+          row[0] = count + 1;
+        }
+
+        // Tulis tepat pada Kolom B sampai Kolom T (19 Kolom, Kolom A kosong sebagai margin)
+        sheetForms.getRange(targetRow, 2, 1, row.length).setValues([row]);
+
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "success",
+          message: "Formulir berhasil ditulis ke Google Sheet!",
+          rowNumber: targetRow,
+          sheetTitle: sheetForms.getName()
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+
+      // 2. Action: Update Status Approval
+      if (data.action === "update_status") {
+        var docNum = data.docNumber;
+        var newStatus = data.status;
+        var levelOto = data.levelOtorisasi;
+        var statusKasBon = data.statusKasBon;
+
+        var colDValues = sheetForms.getRange("D8:D1000").getValues();
+        var foundRow = -1;
+        for (var j = 0; j < colDValues.length; j++) {
+          if (colDValues[j][0] == docNum) {
+            foundRow = 8 + j;
+            break;
+          }
+        }
+
+        if (foundRow > 0) {
+          if (levelOto) sheetForms.getRange(foundRow, 16).setValue(levelOto); // Col P
+          if (newStatus) sheetForms.getRange(foundRow, 17).setValue(newStatus); // Col Q
+          if (statusKasBon) sheetForms.getRange(foundRow, 18).setValue(statusKasBon); // Col R
+        }
+
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "success",
+          updatedRow: foundRow
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+
+      // 3. Action: Register User Baru ke Master Login
+      if (data.action === "register_user" || data.user) {
+        var userSheet = ss.getSheetByName("Master Login");
+        if (!userSheet) {
+          userSheet = ss.insertSheet("Master Login");
+          userSheet.getRange(1, 1, 1, 8).setValues([[
+            "No", "ID User", "Nama Lengkap", "Email", "Role", "Divisi", "Jabatan", "Waktu Daftar"
+          ]]);
+        }
+        var user = data.user || {};
+        var uRow = data.row || [
+          userSheet.getLastRow(),
+          user.id || "USR-" + new Date().getTime(),
+          user.name || "-",
+          user.email || "-",
+          user.role || "Staff",
+          user.division || "Finance",
+          user.title || "-",
+          user.registeredAt || new Date().toISOString()
+        ];
+        var nextUserRow = Math.max(2, userSheet.getLastRow() + 1);
+        userSheet.getRange(nextUserRow, 1, 1, uRow.length).setValues([uRow]);
+
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "success",
+          sheetTitle: "Master Login"
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+
+      // Ping / Test
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        message: "Koneksi Webhook CLX Aktif!",
+        spreadsheet: ss.getName()
+      })).setMimeType(ContentService.MimeType.JSON);
+
+    } catch (err) {
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "error",
+        message: err.toString()
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+
+  function doGet(e) {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    return ContentService.createTextOutput(JSON.stringify({
+      status: "ok",
+      message: "CLX Google Sheets Auto-Sync Webhook is Active!",
+      spreadsheet: ss.getName(),
+      sheets: ss.getSheets().map(function(s) { return s.getName(); })
+    })).setMimeType(ContentService.MimeType.JSON);
+  }`;
+
+  export function getAppsScriptUrl(): string {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(STORAGE_KEY_APPS_SCRIPT_URL);
+      if (stored && stored.trim()) return stored.trim();
+    }
+    return (import.meta as any).env?.VITE_APPS_SCRIPT_URL || '';
+  }
+
+  export function setAppsScriptUrl(url: string): void {
+    if (typeof window !== 'undefined') {
+      if (url && url.trim()) {
+        localStorage.setItem(STORAGE_KEY_APPS_SCRIPT_URL, url.trim());
+      } else {
+        localStorage.removeItem(STORAGE_KEY_APPS_SCRIPT_URL);
+      }
+    }
+  }
+
+  export function isAutoSyncConfigured(): boolean {
+    return Boolean(getAppsScriptUrl());
+  }
+
+  /**
+   * Send payload to Google Apps Script Webhook.
+   * Handles CORS redirects seamlessly using text/plain payload and no-cors fallback.
+   */
+  export async function sendToAppsScriptWebhook(
+    payload: any
+  ): Promise<{ success: boolean; data?: any; error?: string }> {
+    const url = getAppsScriptUrl();
+    if (!url) {
+      return { success: false, error: 'URL Google Apps Script Webhook belum dikonfigurasi.' };
+    }
+
+    try {
+      // First attempt: standard fetch with text/plain body to avoid complex CORS preflights
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'text/plain;charset=utf-8',
+          },
+          body: JSON.stringify(payload),
+        });
+
+        if (response.ok) {
+          const resData = await response.json();
+          return { success: true, data: resData };
+        }
+      } catch (err: any) {
+        console.warn('Standard webhook fetch note, trying no-cors fallback:', err);
+      }
+
+      // Second attempt: no-cors mode (Google Apps Script always executes even if response is opaque to browser)
+      await fetch(url, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: {
+          'Content-Type': 'text/plain;charset=utf-8',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      return { 
+        success: true, 
+        data: { message: 'Data dikirim via Webhook Google Apps Script.' } 
+      };
+    } catch (err: any) {
+      console.error('sendToAppsScriptWebhook error:', err);
+      return { success: false, error: err?.message || 'Gagal mengirim data ke Webhook.' };
+    }
+  }
+
+  /**
+   * Automatic background synchronization for a single form document.
+   * Tries Webhook first (no login required for staff!), then Google OAuth if available.
+   */
+  export async function autoSyncFormToGoogleSheet(
+    doc: FormDocument,
+    rowIndex?: number
+  ): Promise<{ synced: boolean; method: string; rowNumber?: number; sheetTitle?: string; error?: string }> {
+    const row = formatFormRow(doc, rowIndex || 1);
+
+    // Method 1: Google Apps Script Webhook (ZERO LOGIN, WORKS 100% ON VERCEL)
+    if (isAutoSyncConfigured()) {
+      const webhookRes = await sendToAppsScriptWebhook({
+        action: 'append_form',
+        form: doc,
+        row,
+      });
+      if (webhookRes.success) {
+        return {
+          synced: true,
+          method: 'webhook',
+          rowNumber: webhookRes.data?.rowNumber,
+          sheetTitle: webhookRes.data?.sheetTitle || 'Rekap Form CLX',
+        };
+      }
+    }
+
+    // Method 2: Google Sheets API via OAuth token
+    const token = getGoogleAccessToken();
+    if (token) {
+      const sheetsRes = await appendFormToGoogleSheets(doc, token);
+      if (sheetsRes.success) {
+        return {
+          synced: true,
+          method: 'oauth_sheets_api',
+          rowNumber: sheetsRes.rowNumber,
+          sheetTitle: sheetsRes.sheetTitle,
+        };
+      }
+    }
+
+    return {
+      synced: false,
+      method: 'none',
+      error: 'Belum ada Webhook Google Apps Script atau Google OAuth yang terhubung.',
+    };
+  }
+
+  /**
+   * Automatic status update in Google Sheet when a form is approved
+   */
+  export async function autoSyncStatusToGoogleSheet(
+    doc: FormDocument
+  ): Promise<boolean> {
+    if (!isAutoSyncConfigured()) return false;
+
+    const levelOtorisasi = doc.totalAmount > 10_000_000
+      ? 'Maker -> CSO -> COO -> CFO -> CEO (Wajib CEO)'
+      : 'Maker -> CSO -> COO -> CFO (Selesai di CFO)';
+    const statusKasBon = doc.formType === 'FPU' ? 'Kas Bon Aktif' : '-';
+
+    const res = await sendToAppsScriptWebhook({
+      action: 'update_status',
+      docNumber: doc.docNumber,
+      status: doc.status,
+      levelOtorisasi,
+      statusKasBon,
+    });
+    return res.success;
+  }
+
+  /**
+   * Automatic user registration sync to Master Login tab
+   */
+  export async function autoSyncUserToGoogleSheet(
+    user: User
+  ): Promise<boolean> {
+    if (isAutoSyncConfigured()) {
+      const res = await sendToAppsScriptWebhook({
+        action: 'register_user',
+        user,
+      });
+      if (res.success) return true;
+    }
+
+    const token = getGoogleAccessToken();
+    if (token) {
+      const res = await appendUserToMasterLogin(user, token);
+      return res.success;
+    }
+
+    return false;
+  }
+

@@ -25,7 +25,7 @@ import {
   Copy,
   Check
 } from 'lucide-react';
-import { SPREADSHEET_URL, copyFormsToClipboard } from '../utils/googleWorkspace.ts';
+import { SPREADSHEET_URL, copyFormsToClipboard, isAutoSyncConfigured } from '../utils/googleWorkspace.ts';
 
 interface FormCreatorProps {
   onSuccess: (createdDoc: FormDocument) => void;
@@ -237,8 +237,8 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
       return;
     }
 
-    // If Google is not connected, prompt the user first so data writes directly to spreadsheet
-    if (!isGoogleConnected && !googleToken) {
+    // If Auto-Sync Webhook is configured or Google OAuth is connected, proceed directly to save & sync
+    if (!isAutoSyncConfigured() && !isGoogleConnected && !googleToken) {
       setShowPromptGoogle(true);
       return;
     }

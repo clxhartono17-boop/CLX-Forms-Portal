@@ -7,6 +7,7 @@ import {
   signOutGoogle, 
   appendUserToMasterLogin,
   getGoogleAccessToken,
+  autoSyncUserToGoogleSheet,
   GoogleAuthUser
 } from '../utils/googleWorkspace.ts';
 import { User as FirebaseUser } from 'firebase/auth';
@@ -247,14 +248,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setRegisteredUsers(prev => [...prev, newUser]);
     setCurrentUser(newUser);
 
-    // Sync to Google Sheet tab "Master Login"
+    // Sync to Google Sheet tab "Master Login" via Webhook or OAuth
     let sheetsSyncSuccess = false;
     let masterTabName = 'Master Login';
-    const token = googleToken || getGoogleAccessToken();
-    if (token) {
-      const res = await appendUserToMasterLogin(newUser, token);
-      sheetsSyncSuccess = res.success;
-      if (res.sheetTitle) masterTabName = res.sheetTitle;
+    try {
+      const webhookOk = await autoSyncUserToGoogleSheet(newUser);
+      if (webhookOk) {
+        sheetsSyncSuccess = true;
+      } else {
+        const token = googleToken || getGoogleAccessToken();
+        if (token) {
+          const res = await appendUserToMasterLogin(newUser, token);
+          sheetsSyncSuccess = res.success;
+          if (res.sheetTitle) masterTabName = res.sheetTitle;
+        }
+      }
+    } catch (e) {
+      console.warn('Auto-sync user notice:', e);
     }
 
     // Always run backend sync fallback as well
