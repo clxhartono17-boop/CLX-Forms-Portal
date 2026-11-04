@@ -8,11 +8,17 @@ import {
   appendFormToGoogleSheets, 
   getGoogleAccessToken, 
   autoSyncFormToGoogleSheet, 
-  autoSyncStatusToGoogleSheet 
+  autoSyncStatusToGoogleSheet,
+  fetchFormsFromAppsScriptWebhook,
+  syncFormsToWebhook,
+  isAutoSyncConfigured
 } from '../utils/googleWorkspace.ts';
 
 interface FormContextType {
   forms: FormDocument[];
+  isLoadingFromSheet: boolean;
+  lastSyncedAt: string | null;
+  refreshFromGoogleSheet: () => Promise<number>;
   addForm: (doc: FormDocument) => Promise<FormDocument>;
   updateForm: (doc: FormDocument) => void;
   deleteForm: (id: string) => void;
@@ -43,6 +49,41 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     return INITIAL_FORMS;
   });
+
+  const [isLoadingFromSheet, setIsLoadingFromSheet] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+
+  const refreshFromGoogleSheet = async (): Promise<number> => {
+    if (!isAutoSyncConfigured()) return 0;
+    setIsLoadingFromSheet(true);
+    try {
+      const res = await fetchFormsFromAppsScriptWebhook();
+      if (res.success && res.forms) {
+        if (res.forms.length > 0) {
+          setForms(res.forms);
+          setLastSyncedAt(new Date().toISOString());
+          return res.forms.length;
+        } else if (forms.length > 0) {
+          // If sheet is empty but web portal has transactions, push them automatically!
+          await syncFormsToWebhook(forms);
+          setLastSyncedAt(new Date().toISOString());
+          return forms.length;
+        }
+      }
+    } catch (err) {
+      console.warn('refreshFromGoogleSheet error:', err);
+    } finally {
+      setIsLoadingFromSheet(false);
+    }
+    return 0;
+  };
+
+  // On mount: if Webhook is configured, fetch latest data from Google Sheet
+  useEffect(() => {
+    if (isAutoSyncConfigured()) {
+      refreshFromGoogleSheet();
+    }
+  }, []);
 
   useEffect(() => {
     try {
@@ -249,6 +290,9 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <FormContext.Provider
       value={{
         forms,
+        isLoadingFromSheet,
+        lastSyncedAt,
+        refreshFromGoogleSheet,
         addForm,
         updateForm,
         deleteForm,

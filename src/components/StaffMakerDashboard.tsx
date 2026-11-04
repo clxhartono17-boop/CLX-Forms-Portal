@@ -50,7 +50,7 @@ export const StaffMakerDashboard: React.FC<StaffMakerDashboardProps> = ({
   onSelectDoc,
   onCreateNew,
 }) => {
-  const { forms } = useForms();
+  const { forms, refreshFromGoogleSheet, isLoadingFromSheet } = useForms();
   const { currentUser, isGoogleConnected, googleUser, googleToken, connectGoogle, registeredUsers } = useAuth();
 
   const [isSyncingSheets, setIsSyncingSheets] = useState(false);
@@ -66,6 +66,22 @@ export const StaffMakerDashboard: React.FC<StaffMakerDashboardProps> = ({
       setSyncFeedback(`✅ ${forms.length} formulir berhasil disalin! Buka Google Sheet Anda, klik sel B9, lalu tekan Ctrl+V.`);
       setTimeout(() => setCopiedB9(false), 5000);
       setTimeout(() => setSyncFeedback(null), 8000);
+    }
+  };
+
+  const handleRefreshFromSheet = async () => {
+    if (!autoSyncOn) {
+      setShowAutoSyncModal(true);
+      return;
+    }
+    setSyncFeedback('Sedang menarik transaksi terbaru dari Google Spreadsheet...');
+    try {
+      const count = await refreshFromGoogleSheet();
+      setSyncFeedback(`✅ Berhasil! Mengambil ${count} transaksi dari spreadsheet Rekap Form CLX.`);
+    } catch (err: any) {
+      setSyncFeedback(`Catatan: ${err?.message || 'Gagal memuat'}`);
+    } finally {
+      setTimeout(() => setSyncFeedback(null), 5000);
     }
   };
 
@@ -260,7 +276,17 @@ export const StaffMakerDashboard: React.FC<StaffMakerDashboardProps> = ({
               ) : (
                 <RefreshCw className="w-3.5 h-3.5" />
               )}
-              <span>{isSyncingSheets ? 'Menyinkronkan...' : '⚡ Sinkronkan API'}</span>
+              <span>{isSyncingSheets ? 'Menyinkronkan...' : '⚡ Kirim ke Sheet'}</span>
+            </button>
+
+            <button
+              onClick={handleRefreshFromSheet}
+              disabled={isLoadingFromSheet}
+              title="Tarik data transaksi terbaru dari Google Spreadsheet ke portal web"
+              className="inline-flex items-center space-x-1 px-3 py-2 text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg transition shadow-2xs disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-blue-600 ${isLoadingFromSheet ? 'animate-spin' : ''}`} />
+              <span>{isLoadingFromSheet ? 'Memuat...' : '🔄 Tarik dari Sheet'}</span>
             </button>
 
             <button

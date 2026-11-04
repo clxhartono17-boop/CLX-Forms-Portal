@@ -45,7 +45,7 @@ interface DashboardProps {
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }) => {
-  const { forms, resetToDefault } = useForms();
+  const { forms, resetToDefault, refreshFromGoogleSheet, isLoadingFromSheet } = useForms();
   const { isGoogleConnected, googleUser, googleToken, connectGoogle, registeredUsers } = useAuth();
 
   const [isSyncingSheets, setIsSyncingSheets] = useState(false);
@@ -61,6 +61,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
       setSyncFeedback(`✅ ${filteredForms.length} formulir berhasil disalin ke clipboard! Buka Google Sheet Anda, klik sel B9, lalu tekan Ctrl+V.`);
       setTimeout(() => setCopiedB9(false), 5000);
       setTimeout(() => setSyncFeedback(null), 8000);
+    }
+  };
+
+  const handleRefreshFromSheet = async () => {
+    if (!autoSyncOn) {
+      setShowAutoSyncModal(true);
+      return;
+    }
+    setSyncFeedback('Sedang menarik data transaksi terbaru dari Google Spreadsheet...');
+    try {
+      const count = await refreshFromGoogleSheet();
+      setSyncFeedback(`✅ Berhasil! Mengambil ${count} transaksi dari spreadsheet Rekap Form CLX.`);
+    } catch (err: any) {
+      setSyncFeedback(`Catatan: ${err?.message || 'Gagal memuat'}`);
+    } finally {
+      setTimeout(() => setSyncFeedback(null), 5000);
     }
   };
 
@@ -224,14 +240,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
               <span>{copiedB9 ? 'Tersalin!' : '📋 Salin Data (Paste ke B9)'}</span>
             </button>
 
+            <button
+              onClick={handleRefreshFromSheet}
+              disabled={isLoadingFromSheet}
+              className="flex-1 sm:flex-initial inline-flex items-center justify-center space-x-1.5 px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl border border-slate-700 shadow-md transition disabled:opacity-50"
+            >
+              <RefreshCw className={`w-4 h-4 text-blue-400 ${isLoadingFromSheet ? 'animate-spin' : ''}`} />
+              <span>{isLoadingFromSheet ? 'Memuat...' : '🔄 Tarik Data dari Sheet'}</span>
+            </button>
+
             <a
               href={SPREADSHEET_URL}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center justify-center space-x-1 px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs rounded-xl transition"
+              className="inline-flex items-center justify-center space-x-1 px-3 py-2.5 bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800 font-semibold text-xs rounded-xl transition"
             >
               <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
-              <span className="hidden sm:inline">Buka Sheet</span>
+              <span className="hidden sm:inline">Buka Sheet (Owner)</span>
             </a>
           </div>
         </div>
@@ -334,7 +359,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
               className="inline-flex items-center space-x-1 px-3 py-2 text-xs font-bold text-blue-800 bg-blue-100 hover:bg-blue-200 border border-blue-300 rounded-lg transition shadow-2xs disabled:opacity-50"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isSyncingSheets ? 'animate-spin' : ''}`} />
-              <span>{isSyncingSheets ? 'Menyinkronkan...' : '⚡ Sinkronkan API'}</span>
+              <span>{isSyncingSheets ? 'Menyinkronkan...' : '⚡ Kirim ke Sheet'}</span>
+            </button>
+
+            <button
+              onClick={handleRefreshFromSheet}
+              disabled={isLoadingFromSheet}
+              title="Tarik transaksi terbaru dari Google Spreadsheet ke portal web (Sinkronisasi 2 Arah)"
+              className="inline-flex items-center space-x-1 px-3 py-2 text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg transition shadow-2xs disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-blue-600 ${isLoadingFromSheet ? 'animate-spin' : ''}`} />
+              <span>{isLoadingFromSheet ? 'Memuat...' : '🔄 Tarik dari Sheet'}</span>
             </button>
 
             <button

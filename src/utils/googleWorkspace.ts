@@ -852,6 +852,16 @@ export async function syncAllDataToGoogleSheets(
         })).setMimeType(ContentService.MimeType.JSON);
       }
 
+      // 4. Action: Get All Forms (Read from Sheet)
+      if (data.action === "get_forms" || data.action === "read_forms") {
+        var allForms = getAllFormsJson(ss);
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "success",
+          forms: allForms,
+          total: allForms.length
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+
       // Ping / Test
       return ContentService.createTextOutput(JSON.stringify({
         status: "success",
@@ -867,14 +877,106 @@ export async function syncAllDataToGoogleSheets(
     }
   }
 
+  function getAllFormsJson(ss) {
+    var sheetForms = ss.getSheetByName("Rekap Form CLX") || ss.getSheets()[0];
+    var lastRow = sheetForms.getLastRow();
+    var formsList = [];
+
+    if (lastRow >= 9) {
+      var numRows = lastRow - 8;
+      var data = sheetForms.getRange(9, 2, numRows, 19).getValues();
+
+      for (var i = 0; i < data.length; i++) {
+        var row = data[i];
+        // Col D in spreadsheet is index 2 of range B..T (No Formulir)
+        var docNum = row[2];
+        if (docNum && String(docNum).trim() !== "" && String(docNum).trim() !== "-") {
+          var seq = row[0] || (i + 1);
+          var fType = String(row[1] || "FPP").trim();
+          var docNo = String(row[2]).trim();
+          var dDate = row[3] instanceof Date ? Utilities.formatDate(row[3], Session.getScriptTimeZone() || "GMT+7", "yyyy-MM-dd") : String(row[3] || "");
+          var nDate = row[4] instanceof Date ? Utilities.formatDate(row[4], Session.getScriptTimeZone() || "GMT+7", "yyyy-MM-dd") : String(row[4] || dDate);
+          var div = String(row[5] || "Finance").trim();
+          var reqName = String(row[6] || "").trim();
+          var purp = String(row[7] || "").trim();
+          var dpp = Number(row[8]) || 0;
+          var tax = Number(row[9]) || 0;
+          var total = Number(row[10]) || dpp;
+          var payMethod = String(row[11] || "Bank Transfer").trim();
+          var bName = String(row[12] || "").trim();
+          var settle = String(row[13] || "-").trim();
+          var levelOto = String(row[14] || "").trim();
+          var st = String(row[15] || "Pending Approval").trim();
+          var nts = String(row[17] || "").trim();
+          var link = String(row[18] || "").trim();
+
+          var assignee = "Done";
+          if (st === "Pending Approval" || st.indexOf("Pending") !== -1) {
+            assignee = "CSO";
+          } else if (st === "Approved by CSO") {
+            assignee = "COO";
+          } else if (st === "Approved by COO") {
+            assignee = "CFO";
+          } else if (st === "Approved by CFO") {
+            assignee = (total > 10000000) ? "CEO" : "Done";
+          } else if (st === "Fully Approved" || st === "Rejected") {
+            assignee = "Done";
+          }
+
+          formsList.push({
+            id: "sheet-row-" + (9 + i) + "-" + docNo.replace(/[^a-zA-Z0-9]/g, "_"),
+            sequenceNumber: Number(seq) || (i + 1),
+            formType: (fType === "PFB" ? "FPP" : fType),
+            docNumber: docNo,
+            date: dDate,
+            neededDate: nDate,
+            division: div,
+            requesterName: reqName,
+            purpose: purp,
+            totalAmount: total,
+            subtotalAmount: dpp,
+            taxAmount: tax,
+            paymentMethod: payMethod,
+            bankName: bName,
+            settlementEstimate: settle,
+            notes: nts,
+            status: st,
+            currentAssigneeRole: assignee,
+            googleSheets: {
+              synced: true,
+              rowNumber: 9 + i,
+              sheetName: sheetForms.getName()
+            },
+            googleDrive: {
+              synced: link.indexOf("http") !== -1,
+              fileUrl: link.indexOf("http") !== -1 ? link : undefined
+            }
+          });
+        }
+      }
+    }
+
+    return formsList;
+  }
+
   function doGet(e) {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    return ContentService.createTextOutput(JSON.stringify({
-      status: "ok",
-      message: "CLX Google Sheets Auto-Sync Webhook is Active!",
-      spreadsheet: ss.getName(),
-      sheets: ss.getSheets().map(function(s) { return s.getName(); })
-    })).setMimeType(ContentService.MimeType.JSON);
+    try {
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      var formsList = getAllFormsJson(ss);
+
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        forms: formsList,
+        total: formsList.length,
+        spreadsheet: ss.getName()
+      })).setMimeType(ContentService.MimeType.JSON);
+    } catch (err) {
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "error",
+        message: err.toString(),
+        forms: []
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
   }`;
 
   export function getAppsScriptUrl(): string {
@@ -1140,5 +1242,54 @@ export async function syncAllDataToGoogleSheets(
         : 'Gagal menyinkronkan data.',
     };
   }
+
+  /**
+   * Read all transactions from Google Sheet via Apps Script Webhook.
+   * This powers the bi-directional sync (menampilkan data dari spreadsheet di web portal).
+   */
+  export async function fetchFormsFromAppsScriptWebhook(): Promise<{
+    success: boolean;
+    forms: FormDocument[];
+    error?: string;
+  }> {
+    const url = getAppsScriptUrl();
+    if (!url) {
+      return { success: false, forms: [], error: 'URL Webhook Google Apps Script belum disetel.' };
+    }
+
+    try {
+      // 1. First attempt: standard GET
+      try {
+        const getRes = await fetch(url, { method: 'GET', redirect: 'follow' });
+        if (getRes.ok) {
+          const data = await getRes.json();
+          if (data && Array.isArray(data.forms)) {
+            return { success: true, forms: data.forms };
+          }
+        }
+      } catch (getErr) {
+        console.warn('GET from webhook note, trying POST action get_forms:', getErr);
+      }
+
+      // 2. Second attempt: POST with text/plain action 'get_forms'
+      const postRes = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'get_forms' }),
+      });
+      if (postRes.ok) {
+        const pData = await postRes.json();
+        if (pData && Array.isArray(pData.forms)) {
+          return { success: true, forms: pData.forms };
+        }
+      }
+    } catch (err: any) {
+      console.error('fetchFormsFromAppsScriptWebhook error:', err);
+      return { success: false, forms: [], error: err?.message || 'Gagal membaca data dari Google Sheet' };
+    }
+
+    return { success: false, forms: [], error: 'Tidak dapat mengambil formulir dari Google Sheet' };
+  }
+
 
 

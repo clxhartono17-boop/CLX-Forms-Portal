@@ -214,16 +214,23 @@ export const GoogleAutoSyncModal: React.FC<GoogleAutoSyncModalProps> = ({
         </div>
 
         <div className="p-5 text-xs text-slate-700 space-y-4 max-h-[75vh] overflow-y-auto">
-          {/* Explanation Banner */}
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3.5 space-y-1.5">
-            <div className="flex items-center space-x-2 text-blue-900 font-bold">
-              <Sparkles className="w-4 h-4 text-blue-600" />
-              <span>Kenapa Menggunakan Google Apps Script Webhook?</span>
+          {/* Explanation Banner: Private Backend & 2-Way Sync */}
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 space-y-2">
+            <div className="flex items-center space-x-2 text-blue-950 font-bold">
+              <ShieldCheck className="w-4 h-4 text-emerald-600" />
+              <span>Google Sheet Tetap 100% Privat (Database Backend Rahasia Milik Anda)</span>
             </div>
-            <p className="text-[11px] text-blue-800/90 leading-relaxed">
-              Google OAuth biasa memerlukan setiap staf/maker untuk login popup akun Google dan sering terhalang <em>Error 400: origin_mismatch</em> di Vercel. 
-              Dengan <strong>Webhook Google Apps Script</strong>, spreadsheet Anda sendiri yang bertindak sebagai penerima resmi — sehingga formulir yang dibuat oleh <strong>siapapun di Vercel akan otomatis langsung tercatat di baris 9</strong> seketika!
+            <p className="text-[11px] text-slate-700 leading-relaxed">
+              Anda <strong>TIDAK PERLU</strong> membagikan (share) file Google Sheet di Google Drive kepada staf atau publik. Hak akses file di Google Drive tetap <strong>Restricted / Hanya Anda (clx.hartono17@gmail.com)</strong>.
             </p>
+            <div className="bg-white/80 border border-blue-200/80 rounded-lg p-2.5 text-[11px] text-slate-800 space-y-1">
+              <p><strong>🔄 Cara Kerja Sinkronisasi 2 Arah:</strong></p>
+              <ul className="list-disc list-inside space-y-0.5 text-slate-600">
+                <li><strong>Web &rarr; Sheet:</strong> Setiap form yang dibuat atau di-approve di web otomatis tercatat ke baris 9+ Google Sheet.</li>
+                <li><strong>Sheet &rarr; Web:</strong> Web portal otomatis menarik data dari baris 9+ Google Sheet sehingga tampilan web selalu sama dengan spreadsheet.</li>
+                <li><strong>Privasi Aman:</strong> Staf & Maker hanya melihat data melalui antarmuka web sesuai hak akses masing-masing tanpa pernah bisa membuka link file Google Sheet Anda.</li>
+              </ul>
+            </div>
           </div>
 
           {/* Step 1 to 4 Wizard */}
