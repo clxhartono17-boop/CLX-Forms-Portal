@@ -823,6 +823,71 @@ export async function syncAllDataToGoogleSheets(
         })).setMimeType(ContentService.MimeType.JSON);
       }
 
+      // 2b. Action: Edit / Update Form Data (Perubahan Data oleh User/Maker)
+      if (data.action === "update_form" && (data.row || data.form)) {
+        var docNum = data.docNumber || (data.form ? data.form.docNumber : "");
+        var newRow = data.row;
+        if (!newRow && data.form) {
+          var doc = data.form;
+          newRow = [
+            doc.sequenceNumber || 1,
+            doc.formType || "FPP",
+            doc.docNumber || "-",
+            doc.date || "",
+            doc.neededDate || doc.date || "",
+            doc.division || "Finance",
+            doc.requesterName || "",
+            doc.purpose || "",
+            doc.subtotalAmount || doc.totalAmount || 0,
+            doc.taxAmount || 0,
+            doc.totalAmount || 0,
+            doc.paymentMethod || "Bank Transfer",
+            (doc.bankName || "BCA") + " - " + (doc.bankAccountNo || "-") + " (a.n " + (doc.bankAccountName || "-") + ")",
+            doc.settlementEstimate || (doc.formType === "FPU" ? "H+7 Setelah Realisasi" : "-"),
+            doc.totalAmount > 10000000 ? "Maker -> CSO -> COO -> CFO -> CEO (Wajib CEO)" : "Maker -> CSO -> COO -> CFO (Selesai di CFO)",
+            doc.status || "Pending Approval",
+            doc.formType === "FPU" ? "Kas Bon Aktif" : "-",
+            doc.notes || "-",
+            doc.googleDrive ? (doc.googleDrive.webViewLink || doc.googleDrive.fileUrl || "-") : "-"
+          ];
+        }
+
+        var colDValues = sheetForms.getRange("D8:D1000").getValues();
+        var foundRow = -1;
+        for (var k = 0; k < colDValues.length; k++) {
+          if (String(colDValues[k][0]).trim() === String(docNum).trim()) {
+            foundRow = 8 + k;
+            break;
+          }
+        }
+
+        if (foundRow > 0 && newRow && newRow.length > 0) {
+          var originalSeq = sheetForms.getRange(foundRow, 2).getValue();
+          if (originalSeq) newRow[0] = originalSeq;
+          sheetForms.getRange(foundRow, 2, 1, newRow.length).setValues([newRow]);
+          return ContentService.createTextOutput(JSON.stringify({
+            status: "success",
+            message: "Perubahan form berhasil disimpan ke Google Sheet!",
+            updatedRow: foundRow
+          })).setMimeType(ContentService.MimeType.JSON);
+        }
+      }
+
+      // 2c. Action: Delete Form (Sinkronisasi Hapus Baris)
+      if (data.action === "delete_form" && data.docNumber) {
+        var dNum = String(data.docNumber).trim();
+        var colDValues = sheetForms.getRange("D8:D1000").getValues();
+        for (var m = 0; m < colDValues.length; m++) {
+          if (String(colDValues[m][0]).trim() === dNum) {
+            sheetForms.deleteRow(8 + m);
+            return ContentService.createTextOutput(JSON.stringify({
+              status: "success",
+              message: "Baris formulir berhasil dihapus dari Google Sheet!"
+            })).setMimeType(ContentService.MimeType.JSON);
+          }
+        }
+      }
+
       // 3. Action: Register User Baru ke Master Login
       if (data.action === "register_user" || data.user) {
         var userSheet = ss.getSheetByName("Master Login");
@@ -1290,6 +1355,34 @@ export async function syncAllDataToGoogleSheets(
 
     return { success: false, forms: [], error: 'Tidak dapat mengambil formulir dari Google Sheet' };
   }
+
+  /**
+   * Push edited form data to Google Sheet row in background
+   */
+  export async function autoUpdateFormInGoogleSheet(doc: FormDocument): Promise<boolean> {
+    if (!isAutoSyncConfigured()) return false;
+    const row = formatFormRow(doc, doc.sequenceNumber || 1);
+    const res = await sendToAppsScriptWebhook({
+      action: 'update_form',
+      docNumber: doc.docNumber,
+      form: doc,
+      row,
+    });
+    return res.success;
+  }
+
+  /**
+   * Push form deletion to Google Sheet in background
+   */
+  export async function autoDeleteFormInGoogleSheet(docNumber: string): Promise<boolean> {
+    if (!isAutoSyncConfigured()) return false;
+    const res = await sendToAppsScriptWebhook({
+      action: 'delete_form',
+      docNumber,
+    });
+    return res.success;
+  }
+
 
 
 

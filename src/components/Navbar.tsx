@@ -12,7 +12,6 @@ import {
   LogIn,
   Zap
 } from 'lucide-react';
-import { GoogleConnectButton } from './GoogleConnectButton.tsx';
 import { GoogleAutoSyncModal } from './GoogleAutoSyncModal.tsx';
 import { isAutoSyncConfigured } from '../utils/googleWorkspace.ts';
 
@@ -50,24 +49,24 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenR
         <div className="flex items-center justify-between min-h-[64px] py-2.5 gap-3">
           {/* Brand Logo & Title with official CLX launcher icon */}
           <div 
-            className="flex items-center space-x-3 cursor-pointer select-none shrink-0" 
+            className="flex items-center space-x-2.5 cursor-pointer select-none shrink-0" 
             onClick={() => setActiveTab('dashboard')}
           >
             <img 
               src="/clx_launcher_icon.png" 
               alt="Logo CLX" 
-              className="w-10 h-10 object-contain rounded-xl shadow-md bg-white p-0.5 border border-slate-700 hover:scale-105 transition-transform" 
+              className="w-9 h-9 object-contain rounded-xl shadow-md bg-white p-0.5 border border-slate-700 hover:scale-105 transition-transform" 
             />
             <div>
               <div className="flex items-center space-x-2">
-                <span className="font-black text-sm sm:text-base tracking-tight text-white uppercase">
+                <span className="font-black text-sm tracking-tight text-white uppercase whitespace-nowrap">
                   PT. CONNECTIVITY LEADS EXCELLENCE
                 </span>
-                <span className="hidden sm:inline-block text-[10px] font-bold bg-blue-950 text-blue-300 border border-blue-800/80 px-2 py-0.5 rounded-full">
+                <span className="hidden 2xl:inline-block text-[10px] font-bold bg-blue-950 text-blue-300 border border-blue-800/80 px-2 py-0.5 rounded-full whitespace-nowrap">
                   FPU • FPP • FPPB
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 hidden md:block leading-tight mt-0.5">
+              <p className="text-[10px] text-slate-400 hidden lg:block leading-tight mt-0.5">
                 Financial, Operational & Purchase Control System
               </p>
             </div>
@@ -122,26 +121,22 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenR
           </nav>
 
           {/* User Account / Role & Registration */}
-          <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
-            {/* Google Workspace Connection & Auto-Sync Webhook */}
-            <div className="flex items-center space-x-1.5">
-              <button
-                onClick={() => setShowAutoSyncModal(true)}
-                title="Konfigurasi Auto-Sync Google Sheets otomatis tanpa login (khusus portal Vercel)"
-                className={`inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs font-bold transition shadow-2xs border ${
-                  autoSyncOn
-                    ? 'bg-emerald-950/90 border-emerald-500/80 text-emerald-300 hover:bg-emerald-900'
-                    : 'bg-blue-950/80 border-blue-600/70 text-blue-300 hover:bg-blue-900'
-                }`}
-              >
-                <Zap className={`w-3.5 h-3.5 ${autoSyncOn ? 'text-emerald-400' : 'text-amber-400'}`} />
-                <span className="hidden sm:inline">
-                  {autoSyncOn ? 'Auto-Sync Aktif' : '⚡ Auto-Sync Sheet'}
-                </span>
-              </button>
-
-              <GoogleConnectButton compact={true} />
-            </div>
+          <div className="flex items-center space-x-2 shrink-0">
+            {/* Auto-Sync Backend Status */}
+            <button
+              onClick={() => setShowAutoSyncModal(true)}
+              title="Status Sinkronisasi Otomatis Google Sheets Backend"
+              className={`inline-flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition shadow-2xs border whitespace-nowrap ${
+                autoSyncOn
+                  ? 'bg-emerald-950/90 border-emerald-500/80 text-emerald-300 hover:bg-emerald-900'
+                  : 'bg-blue-950/80 border-blue-600/70 text-blue-300 hover:bg-blue-900'
+              }`}
+            >
+              <Zap className={`w-3.5 h-3.5 ${autoSyncOn ? 'text-emerald-400' : 'text-amber-400'}`} />
+              <span className="hidden sm:inline">
+                {autoSyncOn ? 'Auto-Sync Aktif' : 'Auto-Sync Sheet'}
+              </span>
+            </button>
 
             <GoogleAutoSyncModal
               isOpen={showAutoSyncModal}
@@ -152,29 +147,29 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenR
               <>
                 <button
                   onClick={() => onOpenRegister ? onOpenRegister() : setShowAuthModal(true)}
-                  className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 text-xs font-bold text-blue-200 bg-blue-950/80 hover:bg-blue-900 border border-blue-800 rounded-lg transition"
+                  className="inline-flex items-center space-x-1 px-2.5 py-1.5 text-xs font-bold text-blue-200 bg-blue-950/80 hover:bg-blue-900 border border-blue-800 rounded-lg transition whitespace-nowrap"
                 >
                   <UserPlus className="w-3.5 h-3.5 text-blue-400" />
-                  <span className="hidden sm:inline">+ Daftar User</span>
+                  <span className="hidden sm:inline">Daftar User</span>
                 </button>
 
-                <div className="hidden xl:flex flex-col text-right leading-tight">
-                  <span className="text-xs font-bold text-slate-200 max-w-[150px] truncate">
+                <div className="hidden 2xl:flex flex-col text-right leading-tight">
+                  <span className="text-xs font-bold text-slate-200 max-w-[140px] truncate">
                     {currentUser.name}
                   </span>
-                  <span className="text-[10px] text-slate-400 max-w-[150px] truncate">
+                  <span className="text-[10px] text-slate-400 max-w-[140px] truncate">
                     {getCleanUserSubtitle()}
                   </span>
                 </div>
 
                 {/* Account Switcher - Only from Master Login registered accounts */}
-                <div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg px-2 py-1">
+                <div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 max-w-[190px]">
                   <Shield className="w-3.5 h-3.5 text-blue-400 mr-1.5 shrink-0" />
                   <select
                     aria-label="Akun terdaftar"
                     value={currentUser.id}
                     onChange={e => switchRegisteredUser(e.target.value)}
-                    className="bg-transparent text-xs font-bold text-blue-300 focus:outline-none cursor-pointer pr-1"
+                    className="bg-transparent text-xs font-bold text-blue-300 focus:outline-none cursor-pointer pr-1 w-full truncate"
                   >
                     {registeredUsers.map(u => (
                       <option key={u.id} value={u.id} className="bg-slate-900 text-white">
@@ -187,7 +182,8 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenR
                 <button
                   onClick={logout}
                   title="Keluar dari akun"
-                  className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
+                  aria-label="Keluar dari akun"
+                  className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition shrink-0"
                 >
                   <LogOut className="w-4 h-4" />
                 </button>

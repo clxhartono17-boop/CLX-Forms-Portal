@@ -1,23 +1,17 @@
 import React, { useState, useMemo } from 'react';
 import { useForms } from '../context/FormContext.tsx';
-import { useAuth } from '../context/AuthContext.tsx';
-import { FormDocument, FormType, Division, ApprovalStatus } from '../types/index.ts';
-import { formatRupiah, generateOfficialFormPdf, generateMergedPdf, downloadPdf } from '../utils/pdfGenerator.ts';
-import { GOOGLE_SHEETS_TEMPLATE_URL, GOOGLE_DRIVE_PARENT_FOLDER_ID, SHEET_TAB_REKAPAN_FORM } from '../utils/googleIntegration.ts';
+import { FormDocument } from '../types/index.ts';
+import { formatRupiah, generateMergedPdf, downloadPdf } from '../utils/pdfGenerator.ts';
+import { GOOGLE_SHEETS_TEMPLATE_URL } from '../utils/googleIntegration.ts';
 import { 
-  syncAllDataToGoogleSheets, 
-  syncFormsToSpreadsheet,
-  syncFormsToWebhook,
-  SPREADSHEET_URL, 
-  copyFormsToClipboard, 
   downloadFormsCsv, 
   isAutoSyncConfigured 
 } from '../utils/googleWorkspace.ts';
 import { GoogleAutoSyncModal } from './GoogleAutoSyncModal.tsx';
+import { FormEditModal } from './FormEditModal.tsx';
 import { DashboardCharts } from './DashboardCharts.tsx';
 import { 
   Search, 
-  Filter, 
   Calendar, 
   Download, 
   FileText, 
@@ -30,13 +24,8 @@ import {
   PlusCircle, 
   FileSpreadsheet, 
   RotateCcw, 
-  BarChart2,
-  RefreshCw,
-  Layers,
-  Copy,
-  Check,
   Zap,
-  Sparkles
+  Edit3
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -45,65 +34,11 @@ interface DashboardProps {
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }) => {
-  const { forms, resetToDefault, refreshFromGoogleSheet, isLoadingFromSheet } = useForms();
-  const { isGoogleConnected, googleUser, googleToken, connectGoogle, registeredUsers } = useAuth();
+  const { forms } = useForms();
 
-  const [isSyncingSheets, setIsSyncingSheets] = useState(false);
-  const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
-  const [copiedB9, setCopiedB9] = useState(false);
+  const [editingDoc, setEditingDoc] = useState<FormDocument | null>(null);
   const [showAutoSyncModal, setShowAutoSyncModal] = useState(false);
   const autoSyncOn = isAutoSyncConfigured();
-
-  const handleCopyB9 = async () => {
-    const ok = await copyFormsToClipboard(filteredForms);
-    if (ok) {
-      setCopiedB9(true);
-      setSyncFeedback(`✅ ${filteredForms.length} formulir berhasil disalin ke clipboard! Buka Google Sheet Anda, klik sel B9, lalu tekan Ctrl+V.`);
-      setTimeout(() => setCopiedB9(false), 5000);
-      setTimeout(() => setSyncFeedback(null), 8000);
-    }
-  };
-
-  const handleRefreshFromSheet = async () => {
-    if (!autoSyncOn) {
-      setShowAutoSyncModal(true);
-      return;
-    }
-    setSyncFeedback('Sedang menarik data transaksi terbaru dari Google Spreadsheet...');
-    try {
-      const count = await refreshFromGoogleSheet();
-      setSyncFeedback(`✅ Berhasil! Mengambil ${count} transaksi dari spreadsheet Rekap Form CLX.`);
-    } catch (err: any) {
-      setSyncFeedback(`Catatan: ${err?.message || 'Gagal memuat'}`);
-    } finally {
-      setTimeout(() => setSyncFeedback(null), 5000);
-    }
-  };
-
-  const handleSyncAll = async () => {
-    setIsSyncingSheets(true);
-    setSyncFeedback('Sedang menyinkronkan seluruh formulir ke Google Spreadsheet Rekap Form CLX...');
-    try {
-      // 1. Try sync via Apps Script Webhook or active Google token
-      const res = await syncFormsToSpreadsheet(forms, registeredUsers, googleToken);
-      if (res.method === 'clipboard') {
-        setCopiedB9(true);
-        setSyncFeedback(`✅ ${res.message}`);
-        setTimeout(() => setCopiedB9(false), 5000);
-        // Also open setup modal if auto-sync is not yet configured
-        if (!autoSyncOn) {
-          setShowAutoSyncModal(true);
-        }
-      } else {
-        setSyncFeedback(`✅ ${res.message}`);
-      }
-    } catch (err: any) {
-      setSyncFeedback(`Catatan sinkronisasi: ${err?.message || 'Periksa koneksi'}`);
-    } finally {
-      setIsSyncingSheets(false);
-      setTimeout(() => setSyncFeedback(null), 8000);
-    }
-  };
 
   // Filters State
   const [searchQuery, setSearchQuery] = useState('');
@@ -191,77 +126,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
 
   return (
     <div className="space-y-6 w-full">
-      {/* Synchronization Alert Banner: Connects Web Vercel with Google Sheet */}
-      {forms.length > 0 && (
-        <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-indigo-950 text-white rounded-2xl p-4 sm:p-5 shadow-lg border border-blue-700/60 flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4">
-          <div className="flex items-start space-x-3.5">
-            <div className="w-10 h-10 rounded-xl bg-blue-500/20 border border-blue-400/40 text-amber-300 flex items-center justify-center shrink-0 mt-0.5">
-              <Zap className="w-5 h-5 fill-current" />
-            </div>
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-black text-sm uppercase tracking-wide text-white">
-                  Sinkronisasi Spreadsheet Rekap Form CLX ({forms.length} Dokumen Tersedia)
-                </span>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                  autoSyncOn 
-                    ? 'bg-emerald-400/20 text-emerald-300 border border-emerald-400/40' 
-                    : 'bg-amber-400/20 text-amber-300 border border-amber-400/40'
-                }`}>
-                  {autoSyncOn ? '🟢 Auto-Sync Webhook Siap' : '⚪ Webhook Belum Diisi'}
-                </span>
-              </div>
-              <p className="text-xs text-slate-300 mt-1 max-w-3xl leading-relaxed">
-                Pastikan transaksi di portal web sama dengan spreadsheet <strong>Rekap Form CLX (gid=0)</strong> pada baris 9 (Kolom B sampai T).
-                Klik <strong>⚡ Sinkronkan Sekarang</strong> untuk mengirim otomatis, atau <strong>📋 Salin (Paste B9)</strong> untuk tempel instan tanpa login.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 shrink-0 w-full xl:w-auto">
-            <button
-              onClick={handleSyncAll}
-              disabled={isSyncingSheets}
-              className="flex-1 sm:flex-initial inline-flex items-center justify-center space-x-1.5 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-md transition disabled:opacity-50"
-            >
-              {isSyncingSheets ? (
-                <RefreshCw className="w-4 h-4 animate-spin text-white" />
-              ) : (
-                <Zap className="w-4 h-4 text-amber-300 fill-current" />
-              )}
-              <span>{isSyncingSheets ? 'Menyinkronkan...' : `⚡ Sinkronkan ${forms.length} Data ke Spreadsheet`}</span>
-            </button>
-
-            <button
-              onClick={handleCopyB9}
-              className="flex-1 sm:flex-initial inline-flex items-center justify-center space-x-1.5 px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-md transition"
-            >
-              {copiedB9 ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-              <span>{copiedB9 ? 'Tersalin!' : '📋 Salin Data (Paste ke B9)'}</span>
-            </button>
-
-            <button
-              onClick={handleRefreshFromSheet}
-              disabled={isLoadingFromSheet}
-              className="flex-1 sm:flex-initial inline-flex items-center justify-center space-x-1.5 px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl border border-slate-700 shadow-md transition disabled:opacity-50"
-            >
-              <RefreshCw className={`w-4 h-4 text-blue-400 ${isLoadingFromSheet ? 'animate-spin' : ''}`} />
-              <span>{isLoadingFromSheet ? 'Memuat...' : '🔄 Tarik Data dari Sheet'}</span>
-            </button>
-
-            <a
-              href={SPREADSHEET_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center justify-center space-x-1 px-3 py-2.5 bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800 font-semibold text-xs rounded-xl transition"
-            >
-              <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
-              <span className="hidden sm:inline">Buka Sheet (Owner)</span>
-            </a>
-          </div>
-        </div>
-      )}
-
       {/* KPI Cards Row */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
@@ -330,47 +194,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => setShowAutoSyncModal(true)}
-              title="Setup Webhook Google Apps Script agar formulir dari Vercel otomatis masuk ke spreadsheet tanpa login"
-              className={`inline-flex items-center space-x-1 px-3 py-2 rounded-lg text-xs font-bold transition shadow-2xs ${
-                autoSyncOn
-                  ? 'bg-emerald-700 hover:bg-emerald-800 text-white'
-                  : 'bg-amber-500 hover:bg-amber-600 text-slate-950'
-              }`}
-            >
-              <Zap className="w-3.5 h-3.5 fill-current" />
-              <span>{autoSyncOn ? '⚡ Auto-Sync Aktif' : '⚡ Setup Auto-Sync'}</span>
-            </button>
-
-            <button
-              onClick={handleCopyB9}
-              title="Salin baris form secara langsung untuk dipaste ke sel B9 Google Sheet (tanpa perlu otorisasi Google)"
-              className="inline-flex items-center space-x-1 px-3 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition shadow-2xs"
-            >
-              {copiedB9 ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-              <span>{copiedB9 ? 'Tersalin!' : '📋 Salin Data (Paste ke B9)'}</span>
-            </button>
-
-            <button
-              onClick={handleSyncAll}
-              disabled={isSyncingSheets}
-              title="Kirim semua data form ke tab Rekap Form CLX Google Spreadsheet via API"
-              className="inline-flex items-center space-x-1 px-3 py-2 text-xs font-bold text-blue-800 bg-blue-100 hover:bg-blue-200 border border-blue-300 rounded-lg transition shadow-2xs disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isSyncingSheets ? 'animate-spin' : ''}`} />
-              <span>{isSyncingSheets ? 'Menyinkronkan...' : '⚡ Kirim ke Sheet'}</span>
-            </button>
-
-            <button
-              onClick={handleRefreshFromSheet}
-              disabled={isLoadingFromSheet}
-              title="Tarik transaksi terbaru dari Google Spreadsheet ke portal web (Sinkronisasi 2 Arah)"
-              className="inline-flex items-center space-x-1 px-3 py-2 text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg transition shadow-2xs disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 text-blue-600 ${isLoadingFromSheet ? 'animate-spin' : ''}`} />
-              <span>{isLoadingFromSheet ? 'Memuat...' : '🔄 Tarik dari Sheet'}</span>
-            </button>
+            {autoSyncOn ? (
+              <button
+                onClick={() => setShowAutoSyncModal(true)}
+                title="Auto-Sync Webhook aktif. Klik untuk melihat pengaturan webhook backend."
+                className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 transition shadow-2xs"
+              >
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span className="font-bold">Auto-Sync Aktif</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => setShowAutoSyncModal(true)}
+                title="Setup Webhook Google Apps Script agar formulir dari portal Vercel otomatis masuk ke spreadsheet secara realtime"
+                className="inline-flex items-center space-x-1 px-3 py-2 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-slate-950 transition shadow-2xs"
+              >
+                <Zap className="w-3.5 h-3.5 fill-current" />
+                <span>Setup Auto-Sync</span>
+              </button>
+            )}
 
             <button
               onClick={handleExportCsv}
@@ -406,18 +248,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
           isOpen={showAutoSyncModal}
           onClose={() => setShowAutoSyncModal(false)}
         />
-
-        {syncFeedback && (
-          <div className="p-2.5 bg-blue-50 border border-blue-200 text-blue-900 text-xs rounded-lg flex items-center justify-between">
-            <span className="font-medium">{syncFeedback}</span>
-            <button
-              onClick={() => setSyncFeedback(null)}
-              className="text-blue-500 hover:text-blue-800 font-bold ml-2 text-xs"
-            >
-              &times;
-            </button>
-          </div>
-        )}
 
         {/* Date Period & Dropdown Filters Row */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-1 border-t border-slate-100">
@@ -658,13 +488,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
                               onSelectDoc(doc);
                             }}
                             title="Lihat Detail Form"
+                            aria-label={`Lihat Detail Form ${doc.docNumber}`}
                             className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-slate-100 rounded transition"
                           >
                             <Eye className="w-3.5 h-3.5" />
                           </button>
                           <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              setEditingDoc(doc);
+                            }}
+                            title="Edit Formulir"
+                            aria-label={`Edit Formulir ${doc.docNumber}`}
+                            className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded transition"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
                             onClick={e => handleQuickDownloadMerged(e, doc)}
                             title="Download Merged PDF (Form + Lampiran)"
+                            aria-label={`Download PDF ${doc.docNumber}`}
                             className="p-1.5 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded transition"
                           >
                             <Download className="w-3.5 h-3.5" />
@@ -679,6 +522,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
           </table>
         </div>
       </div>
+
+      {/* Edit Form Modal */}
+      <FormEditModal
+        doc={editingDoc}
+        isOpen={Boolean(editingDoc)}
+        onClose={() => setEditingDoc(null)}
+      />
+
+      {/* Backend AutoSync Setup Modal */}
+      <GoogleAutoSyncModal
+        isOpen={showAutoSyncModal}
+        onClose={() => setShowAutoSyncModal(false)}
+      />
     </div>
   );
 };

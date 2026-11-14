@@ -4,6 +4,7 @@ import { INITIAL_FORMS } from '../data/mockData.ts';
 import { syncToGoogleDrive, syncToGoogleSheets } from '../utils/googleIntegration.ts';
 import { generateMergedPdf } from '../utils/pdfGenerator.ts';
 import { getNextApprovalStep, requiresCeoApproval } from '../utils/approvalRules.ts';
+import { mirrorSheetFormsWithLocal } from '../utils/sheetSyncMirror.ts';
 import { 
   appendFormToGoogleSheets, 
   getGoogleAccessToken, 
@@ -11,6 +12,8 @@ import {
   autoSyncStatusToGoogleSheet,
   fetchFormsFromAppsScriptWebhook,
   syncFormsToWebhook,
+  autoUpdateFormInGoogleSheet,
+  autoDeleteFormInGoogleSheet,
   isAutoSyncConfigured
 } from '../utils/googleWorkspace.ts';
 
@@ -54,35 +57,46 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
 
   const refreshFromGoogleSheet = async (): Promise<number> => {
-    if (!isAutoSyncConfigured()) return 0;
+    if (!isAutoSyncConfigured()) return forms.length;
     setIsLoadingFromSheet(true);
     try {
       const res = await fetchFormsFromAppsScriptWebhook();
-      if (res.success && res.forms) {
-        if (res.forms.length > 0) {
-          setForms(res.forms);
-          setLastSyncedAt(new Date().toISOString());
-          return res.forms.length;
-        } else if (forms.length > 0) {
-          // If sheet is empty but web portal has transactions, push them automatically!
-          await syncFormsToWebhook(forms);
-          setLastSyncedAt(new Date().toISOString());
-          return forms.length;
-        }
+      if (res.success && Array.isArray(res.forms)) {
+        // EXACT MIRROR: If rows were deleted in backend, res.forms does not contain them!
+        setForms(prevForms => mirrorSheetFormsWithLocal(res.forms, prevForms));
+        setLastSyncedAt(new Date().toISOString());
+        return res.forms.length;
       }
     } catch (err) {
       console.warn('refreshFromGoogleSheet error:', err);
     } finally {
       setIsLoadingFromSheet(false);
     }
-    return 0;
+    return forms.length;
   };
 
-  // On mount: if Webhook is configured, fetch latest data from Google Sheet
+  // Auto-sync polling every 15s in background and immediate sync when window is focused
   useEffect(() => {
-    if (isAutoSyncConfigured()) {
+    if (!isAutoSyncConfigured()) return;
+
+    // 1. Initial fetch
+    refreshFromGoogleSheet();
+
+    // 2. Poll every 15 seconds
+    const interval = setInterval(() => {
       refreshFromGoogleSheet();
-    }
+    }, 15000);
+
+    // 3. Tab focus listener: instantly fetch latest spreadsheet changes
+    const onFocus = () => {
+      refreshFromGoogleSheet();
+    };
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+    };
   }, []);
 
   useEffect(() => {
@@ -133,10 +147,20 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const updateForm = (updatedDoc: FormDocument) => {
     setForms(prev => prev.map(f => (f.id === updatedDoc.id ? updatedDoc : f)));
+    // Automatically push update to Google Sheet in background
+    autoUpdateFormInGoogleSheet(updatedDoc).catch(err => {
+      console.warn('Background autoUpdateForm notice:', err);
+    });
   };
 
   const deleteForm = (id: string) => {
+    const target = forms.find(f => f.id === id);
     setForms(prev => prev.filter(f => f.id !== id));
+    if (target?.docNumber) {
+      autoDeleteFormInGoogleSheet(target.docNumber).catch(err => {
+        console.warn('Background autoDeleteForm notice:', err);
+      });
+    }
   };
 
   const approveForm = async (

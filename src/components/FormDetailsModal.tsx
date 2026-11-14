@@ -14,8 +14,10 @@ import {
   Paperclip,
   Shield,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Edit3
 } from 'lucide-react';
+import { FormEditModal } from './FormEditModal.tsx';
 
 interface FormDetailsModalProps {
   doc: FormDocument;
@@ -24,6 +26,7 @@ interface FormDetailsModalProps {
 
 export const FormDetailsModal: React.FC<FormDetailsModalProps> = ({ doc, onClose }) => {
   const [activeTab, setActiveTab] = useState<'paper' | 'drive_sheets' | 'attachments'>('paper');
+  const [isEditing, setIsEditing] = useState(false);
 
   const handleDownloadMerged = async () => {
     try {
@@ -54,6 +57,15 @@ export const FormDetailsModal: React.FC<FormDetailsModalProps> = ({ doc, onClose
           </div>
 
           <div className="flex items-center space-x-2">
+            <button
+              onClick={() => setIsEditing(true)}
+              className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold rounded-lg shadow-sm transition"
+              title="Edit data formulir pengajuan ini"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              <span>Edit Form</span>
+            </button>
+
             <button
               onClick={handleDownloadMerged}
               className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg shadow-sm transition"
@@ -275,6 +287,13 @@ export const FormDetailsModal: React.FC<FormDetailsModalProps> = ({ doc, onClose
           </button>
         </div>
       </div>
+
+      {/* Edit Form Modal */}
+      <FormEditModal
+        doc={doc}
+        isOpen={isEditing}
+        onClose={() => setIsEditing(false)}
+      />
     </div>
   );
 };
