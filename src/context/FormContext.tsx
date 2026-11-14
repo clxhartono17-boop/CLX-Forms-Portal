@@ -75,27 +75,46 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return forms.length;
   };
 
-  // Auto-sync polling every 15s in background and immediate sync when window is focused
+  // Auto-sync polling every 5s in background and immediate sync on focus, visibilitychange, or webhook config update
   useEffect(() => {
-    if (!isAutoSyncConfigured()) return;
+    let interval: ReturnType<typeof setInterval> | null = null;
 
-    // 1. Initial fetch
-    refreshFromGoogleSheet();
+    const startSyncCycle = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+      if (!isAutoSyncConfigured()) return;
 
-    // 2. Poll every 15 seconds
-    const interval = setInterval(() => {
+      // 1. Immediate fetch from sheet "Rekapan Form"
       refreshFromGoogleSheet();
-    }, 15000);
 
-    // 3. Tab focus listener: instantly fetch latest spreadsheet changes
-    const onFocus = () => {
-      refreshFromGoogleSheet();
+      // 2. Poll every 5 seconds so deleted/edited rows mirror rapidly
+      interval = setInterval(() => {
+        refreshFromGoogleSheet();
+      }, 5000);
     };
-    window.addEventListener('focus', onFocus);
+
+    startSyncCycle();
+
+    const onFocusOrVisible = () => {
+      if (document.visibilityState === 'visible' && isAutoSyncConfigured()) {
+        refreshFromGoogleSheet();
+      }
+    };
+    const onConfigUpdated = () => {
+      startSyncCycle();
+    };
+
+    window.addEventListener('focus', onFocusOrVisible);
+    document.addEventListener('visibilitychange', onFocusOrVisible);
+    window.addEventListener('clx-autosync-updated', onConfigUpdated);
 
     return () => {
-      clearInterval(interval);
-      window.removeEventListener('focus', onFocus);
+      if (interval) clearInterval(interval);
+      window.removeEventListener('focus', onFocusOrVisible);
+      document.removeEventListener('visibilitychange', onFocusOrVisible);
+      window.removeEventListener('clx-autosync-updated', onConfigUpdated);
     };
   }, []);
 
@@ -123,7 +142,7 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       let sheetsSuccess = autoRes.synced;
       let targetRowNumber = autoRes.rowNumber;
-      let targetSheetName = autoRes.sheetTitle || 'Rekap Form CLX';
+      let targetSheetName = autoRes.sheetTitle || 'Rekapan Form';
 
       try {
         await syncToGoogleSheets(updatedDoc);

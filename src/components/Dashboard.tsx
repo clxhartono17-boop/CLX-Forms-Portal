@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useForms } from '../context/FormContext.tsx';
+import { useAuth } from '../context/AuthContext.tsx';
 import { FormDocument } from '../types/index.ts';
 import { formatRupiah, generateMergedPdf, downloadPdf } from '../utils/pdfGenerator.ts';
 import { GOOGLE_SHEETS_TEMPLATE_URL } from '../utils/googleIntegration.ts';
@@ -35,6 +36,7 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }) => {
   const { forms } = useForms();
+  const { isAdmin } = useAuth();
 
   const [editingDoc, setEditingDoc] = useState<FormDocument | null>(null);
   const [showAutoSyncModal, setShowAutoSyncModal] = useState(false);
@@ -194,24 +196,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {autoSyncOn ? (
-              <button
-                onClick={() => setShowAutoSyncModal(true)}
-                title="Auto-Sync Webhook aktif. Klik untuk melihat pengaturan webhook backend."
-                className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 transition shadow-2xs"
-              >
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span className="font-bold">Auto-Sync Aktif</span>
-              </button>
-            ) : (
-              <button
-                onClick={() => setShowAutoSyncModal(true)}
-                title="Setup Webhook Google Apps Script agar formulir dari portal Vercel otomatis masuk ke spreadsheet secara realtime"
-                className="inline-flex items-center space-x-1 px-3 py-2 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-slate-950 transition shadow-2xs"
-              >
-                <Zap className="w-3.5 h-3.5 fill-current" />
-                <span>Setup Auto-Sync</span>
-              </button>
+            {isAdmin && (
+              autoSyncOn ? (
+                <button
+                  onClick={() => setShowAutoSyncModal(true)}
+                  title="Auto-Sync Webhook aktif. Klik untuk melihat pengaturan webhook backend."
+                  className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 transition shadow-2xs"
+                >
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span className="font-bold">Auto-Sync Aktif</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => setShowAutoSyncModal(true)}
+                  title="Setup Webhook Google Apps Script agar formulir dari portal Vercel otomatis masuk ke spreadsheet secara realtime"
+                  className="inline-flex items-center space-x-1 px-3 py-2 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-slate-950 transition shadow-2xs"
+                >
+                  <Zap className="w-3.5 h-3.5 fill-current" />
+                  <span>Setup Auto-Sync</span>
+                </button>
+              )
             )}
 
             <button
@@ -223,16 +227,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
               <span>Unduh CSV</span>
             </button>
 
-            <a
-              href={GOOGLE_SHEETS_TEMPLATE_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center space-x-1 px-3 py-2 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>Buka Google Sheets</span>
-              <ExternalLink className="w-3 h-3 ml-0.5" />
-            </a>
+            {isAdmin && (
+              <a
+                href={GOOGLE_SHEETS_TEMPLATE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center space-x-1 px-3 py-2 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Buka Google Sheets</span>
+                <ExternalLink className="w-3 h-3 ml-0.5" />
+              </a>
+            )}
 
             <button
               onClick={onCreateNew}
@@ -244,10 +250,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
           </div>
         </div>
 
-        <GoogleAutoSyncModal
-          isOpen={showAutoSyncModal}
-          onClose={() => setShowAutoSyncModal(false)}
-        />
+        {isAdmin && (
+          <GoogleAutoSyncModal
+            isOpen={showAutoSyncModal}
+            onClose={() => setShowAutoSyncModal(false)}
+          />
+        )}
 
         {/* Date Period & Dropdown Filters Row */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-1 border-t border-slate-100">
@@ -530,11 +538,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSelectDoc, onCreateNew }
         onClose={() => setEditingDoc(null)}
       />
 
-      {/* Backend AutoSync Setup Modal */}
-      <GoogleAutoSyncModal
-        isOpen={showAutoSyncModal}
-        onClose={() => setShowAutoSyncModal(false)}
-      />
+      {/* Backend AutoSync Setup Modal (Admin Only) */}
+      {isAdmin && (
+        <GoogleAutoSyncModal
+          isOpen={showAutoSyncModal}
+          onClose={() => setShowAutoSyncModal(false)}
+        />
+      )}
     </div>
   );
 };

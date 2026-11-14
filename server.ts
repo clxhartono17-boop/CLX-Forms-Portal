@@ -99,18 +99,32 @@ app.post('/api/google/webhook-sync', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Target Apps Script Webhook URL is required' });
     }
 
-    const response = await fetch(targetUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(payload),
-    });
+    let response: Response;
+    if (payload?.action === 'get_forms' || payload?.action === 'read_forms') {
+      const sep = targetUrl.includes('?') ? '&' : '?';
+      response = await fetch(`${targetUrl}${sep}action=get_forms&_t=${Date.now()}`, {
+        method: 'GET',
+        redirect: 'follow',
+      });
+    } else {
+      response = await fetch(targetUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload),
+        redirect: 'follow',
+      });
+    }
 
     const responseText = await response.text();
-    let data;
+    let data: any;
     try {
       data = JSON.parse(responseText);
     } catch {
       data = { raw: responseText };
+    }
+
+    if (data?.status === 'error') {
+      return res.status(502).json({ success: false, error: data.message || 'Apps Script error', data });
     }
 
     return res.json({ success: true, data });
@@ -132,7 +146,7 @@ app.get('/api/google/users', async (_req, res) => {
     const response = await sheets.spreadsheets.values.get({
       auth,
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Master Login!A2:H',
+      range: 'master Login!A2:J',
     });
 
     return res.json({ success: true, data: response.data.values || [] });
@@ -142,13 +156,23 @@ app.get('/api/google/users', async (_req, res) => {
   }
 });
 
-// 4. POST: Register User Baru ke Master Login (Write)
+// 4. POST: Register User Baru ke master Login (Write)
 app.post('/api/google/register-user', async (req, res) => {
   try {
-    const { row, sheetName = 'Master Login' } = req.body;
+    const { row, user, sheetName = 'master Login' } = req.body;
     const auth = getGoogleAuth();
 
     if (!auth) {
+      const targetUrl = process.env.VITE_APPS_SCRIPT_URL;
+      if (targetUrl) {
+        await fetch(targetUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'register_user', user, row }),
+          redirect: 'follow',
+        });
+        return res.json({ success: true, via: 'apps_script_env' });
+      }
       console.log('[API] Service account not configured in .env, simulated register-user accepted');
       return res.json({ success: true });
     }

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { FormDocument } from '../types/index.ts';
+import { useAuth } from '../context/AuthContext.tsx';
 import { formatRupiah, generateMergedPdf, downloadPdf } from '../utils/pdfGenerator.ts';
 import { PhysicalFormPreview } from './PhysicalFormPreview.tsx';
 import { GOOGLE_SHEETS_TEMPLATE_URL, GOOGLE_DRIVE_PARENT_FOLDER_ID } from '../utils/googleIntegration.ts';
@@ -25,6 +26,7 @@ interface FormDetailsModalProps {
 }
 
 export const FormDetailsModal: React.FC<FormDetailsModalProps> = ({ doc, onClose }) => {
+  const { isAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState<'paper' | 'drive_sheets' | 'attachments'>('paper');
   const [isEditing, setIsEditing] = useState(false);
 
@@ -218,15 +220,19 @@ export const FormDetailsModal: React.FC<FormDetailsModalProps> = ({ doc, onClose
 
                   <div className="flex justify-between py-1">
                     <span className="font-semibold text-slate-600">Tautan Dokumen Sheets:</span>
-                    <a
-                      href={GOOGLE_SHEETS_TEMPLATE_URL}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-emerald-700 hover:underline flex items-center space-x-1 font-semibold"
-                    >
-                      <span>Buka Google Sheets CLX Master</span>
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
+                    {isAdmin ? (
+                      <a
+                        href={GOOGLE_SHEETS_TEMPLATE_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-emerald-700 hover:underline flex items-center space-x-1 font-semibold"
+                      >
+                        <span>Buka Google Sheets CLX Master</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    ) : (
+                      <span className="text-slate-500 font-medium">Privat (Akses Khusus Admin)</span>
+                    )}
                   </div>
                 </div>
               </div>

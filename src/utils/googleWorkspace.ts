@@ -18,8 +18,8 @@ export const SPREADSHEET_ID = '1irb4RR0LMMBqRfGP4gxvX82c0nLfWIXKHzQ_tqC3h8c';
 export const DRIVE_PARENT_FOLDER_ID = '1hgUyTqNsfJsC30pY7O2kPS95DqEEySm9';
 export const SPREADSHEET_URL = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/edit?gid=0#gid=0`;
 
-export const TAB_REKAPAN_FORM = 'Rekap Form CLX';
-export const TAB_MASTER_LOGIN = 'Master Login';
+export const TAB_REKAPAN_FORM = 'Rekapan Form';
+export const TAB_MASTER_LOGIN = 'master Login';
 
 const provider = new GoogleAuthProvider();
 provider.addScope('https://www.googleapis.com/auth/spreadsheets');
@@ -251,13 +251,22 @@ export async function getTargetFormsTabTitle(token: string): Promise<string> {
     const sheets = meta.sheets || [];
     if (sheets.length === 0) return TAB_REKAPAN_FORM;
 
-    // 1. Exact match for gid=0 (the primary sheet shown in the user's attachment)
+    // 1. Exact match for "Rekapan Form" or "Rekap Form CLX" (case-insensitive)
+    const namedSheet = sheets.find((s: any) => {
+      const title = (s.properties?.title || '').trim().toLowerCase();
+      return title === 'rekapan form' || title === 'rekap form clx' || title === 'rekap form';
+    });
+    if (namedSheet?.properties?.title) {
+      return namedSheet.properties.title;
+    }
+
+    // 2. Exact match for gid=0 (the primary sheet shown in the user's attachment)
     const gid0Sheet = sheets.find((s: any) => s.properties?.sheetId === 0);
     if (gid0Sheet?.properties?.title) {
       return gid0Sheet.properties.title;
     }
 
-    // 2. Sheet containing "rekap" or "form"
+    // 3. Sheet containing "rekap" or "form"
     const matchSheet = sheets.find((s: any) => {
       const title = (s.properties?.title || '').toLowerCase();
       return title.includes('rekap') || title.includes('form');
@@ -266,7 +275,7 @@ export async function getTargetFormsTabTitle(token: string): Promise<string> {
       return matchSheet.properties.title;
     }
 
-    // 3. Fallback to first sheet
+    // 4. Fallback to first sheet
     return sheets[0]?.properties?.title || TAB_REKAPAN_FORM;
   } catch (err) {
     console.warn('getTargetFormsTabTitle warning:', err);
@@ -659,10 +668,140 @@ export async function syncAllDataToGoogleSheets(
   export const STORAGE_KEY_APPS_SCRIPT_URL = 'clx_apps_script_url_v2';
 
   export const APPS_SCRIPT_SAMPLE_CODE = `/**
-   * CLX Forms Portal - Google Apps Script Auto-Sync Webhook
-   * Menghubungkan portal https://clx-forms-portal.vercel.app/ langsung ke Spreadsheet Rekap Form CLX
-   * Pasang di: Ekstensi > Apps Script di spreadsheet Rekap Form CLX
+   * CLX Forms Portal - Google Apps Script Auto-Sync Webhook (v2.1)
+   * Menghubungkan portal https://clx-forms-portal.vercel.app/ langsung ke Spreadsheet (Rekapan Form & master Login)
+   * Pasang di: Ekstensi > Apps Script di spreadsheet Google Anda
    */
+
+  function findSheetCaseInsensitive(ss, candidates) {
+    var sheets = ss.getSheets();
+    for (var c = 0; c < candidates.length; c++) {
+      var target = String(candidates[c] || "").trim().toLowerCase();
+      for (var i = 0; i < sheets.length; i++) {
+        var name = String(sheets[i].getName() || "").trim().toLowerCase();
+        if (name === target) return sheets[i];
+      }
+    }
+    return null;
+  }
+
+  function getFormsSheet(ss) {
+    return (
+      findSheetCaseInsensitive(ss, ["Rekapan Form", "Rekap Form CLX", "Rekap Form"]) ||
+      ss.getSheets()[0]
+    );
+  }
+
+  function getMasterLoginSheet(ss) {
+    var userSheet = findSheetCaseInsensitive(ss, ["master Login", "Master Login", "master_login", "masterlogin"]);
+    if (!userSheet) {
+      userSheet = ss.insertSheet("master Login");
+      userSheet.getRange(1, 1, 1, 10).setValues([[
+        "No", "ID User", "Nama Lengkap", "Email", "Role", "Divisi", "Jabatan", "No. HP", "Sign Digital", "Waktu Daftar"
+      ]]);
+    } else if (userSheet.getLastRow() === 0) {
+      userSheet.getRange(1, 1, 1, 10).setValues([[
+        "No", "ID User", "Nama Lengkap", "Email", "Role", "Divisi", "Jabatan", "No. HP", "Sign Digital", "Waktu Daftar"
+      ]]);
+    }
+    return userSheet;
+  }
+
+  function getFormsSheetLayout(sheetForms) {
+    var maxScanRows = Math.min(15, Math.max(1, sheetForms.getLastRow()));
+    var maxScanCols = Math.min(10, Math.max(5, sheetForms.getLastColumn()));
+    var scanValues = sheetForms.getRange(1, 1, maxScanRows, maxScanCols).getValues();
+
+    for (var r = 0; r < scanValues.length; r++) {
+      for (var c = 0; c < scanValues[r].length; c++) {
+        var cellText = String(scanValues[r][c] || "").trim().toLowerCase();
+        if (cellText === "no. formulir" || cellText === "no formulir" || cellText === "no. dokumen" || cellText === "no dokumen") {
+          var firstNonEmptyCol = 1;
+          for (var fc = 0; fc < scanValues[r].length; fc++) {
+            if (String(scanValues[r][fc] || "").trim() !== "") {
+              firstNonEmptyCol = fc + 1;
+              break;
+            }
+          }
+          return {
+            headerRow: r + 1,
+            dataStartRow: r + 2,
+            startCol: firstNonEmptyCol,
+            docNumCol: c + 1
+          };
+        }
+      }
+    }
+
+    return {
+      headerRow: 8,
+      dataStartRow: 9,
+      startCol: 2,
+      docNumCol: 4
+    };
+  }
+
+  function buildFormRowArray(doc, seqNo) {
+    var totalVal = Number(doc.totalAmount) || 0;
+    var bankStr = doc.bankName
+      ? (doc.bankName + " - " + (doc.bankAccountNo || "-") + " (a.n " + (doc.bankAccountName || "-") + ")")
+      : "KAS / TUNAI";
+    return [
+      seqNo,
+      doc.formType || "FPP",
+      doc.docNumber || "-",
+      doc.date || "",
+      doc.targetDate || doc.neededDate || doc.date || "",
+      doc.division || "Finance",
+      doc.requesterName || "",
+      doc.purpose || "",
+      doc.subtotalAmount || totalVal,
+      doc.taxAmount || 0,
+      totalVal,
+      doc.paymentMethod || "Bank Transfer",
+      bankStr,
+      doc.settlementDate || doc.settlementEstimate || (doc.formType === "FPU" ? "H+7 Setelah Realisasi" : "-"),
+      totalVal > 10000000 ? "Maker -> CSO -> COO -> CFO -> CEO (Wajib CEO)" : "Maker -> CSO -> COO -> CFO (Selesai di CFO)",
+      doc.status || "Pending Approval",
+      doc.formType === "FPU" ? (doc.status === "Fully Approved" ? "Menunggu SPJ / Realisasi" : "Pengajuan Kas Bon") : "-",
+      doc.notes || "-",
+      doc.googleDrive ? (doc.googleDrive.webViewLink || doc.googleDrive.fileUrl || "-") : "-"
+    ];
+  }
+
+  function syncSingleUserToSheet(userSheet, user, customRow) {
+    var email = String((user && user.email) || (customRow && customRow[3]) || "").trim().toLowerCase();
+    var lastRow = userSheet.getLastRow();
+    var existingRow = -1;
+
+    if (email && lastRow >= 2) {
+      var emailCol = userSheet.getRange(2, 4, lastRow - 1, 1).getValues();
+      for (var r = 0; r < emailCol.length; r++) {
+        if (String(emailCol[r][0] || "").trim().toLowerCase() === email) {
+          existingRow = 2 + r;
+          break;
+        }
+      }
+    }
+
+    var rowNum = existingRow > 0 ? existingRow : Math.max(2, lastRow + 1);
+    var seqNum = rowNum - 1;
+    var uRow = (customRow && customRow.length >= 8) ? customRow.slice() : [
+      seqNum,
+      (user && user.id) || ("USR-" + new Date().getTime()),
+      (user && user.name) || "-",
+      email || "-",
+      (user && user.role) || "Staff",
+      (user && user.division) || "Finance",
+      (user && user.title) || "-",
+      (user && user.phone) || "-",
+      (user && (user.signatureStatus || user.hasSignature)) ? "Terlampir (Sign Digital)" : "Belum Upload",
+      (user && user.registeredAt) || new Date().toISOString()
+    ];
+    uRow[0] = seqNum;
+    userSheet.getRange(rowNum, 1, 1, uRow.length).setValues([uRow]);
+    return rowNum;
+  }
 
   function doPost(e) {
     try {
@@ -677,63 +816,51 @@ export async function syncAllDataToGoogleSheets(
         try {
           data = JSON.parse(postData);
         } catch (err) {
-          data = { action: 'ping' };
+          data = { action: "ping" };
         }
       }
 
-      var sheetForms = ss.getSheetByName("Rekap Form CLX") || ss.getSheets()[0];
+      var sheetForms = getFormsSheet(ss);
+      var layout = getFormsSheetLayout(sheetForms);
 
-      // 0. Action: Batch Sync (Sinkronkan Semua Transaksi Sekaligus)
+      // 0. Action: Batch Sync
       if (data.action === "batch_sync" || data.action === "sync_all" || (data.rows && Array.isArray(data.rows) && data.rows.length > 0)) {
+        if (data.users && Array.isArray(data.users) && data.users.length > 0) {
+          var batchUserSheet = getMasterLoginSheet(ss);
+          for (var uIdx = 0; uIdx < data.users.length; uIdx++) {
+            syncSingleUserToSheet(batchUserSheet, data.users[uIdx], null);
+          }
+        }
+
         var rows = data.rows || [];
         if ((!rows || rows.length === 0) && data.forms && Array.isArray(data.forms)) {
           rows = data.forms.map(function(doc, idx) {
-            return [
-              idx + 1,
-              doc.formType || "FPP",
-              doc.docNumber || "-",
-              doc.date || "",
-              doc.neededDate || doc.date || "",
-              doc.division || "Finance",
-              doc.requesterName || "",
-              doc.purpose || "",
-              doc.subtotalAmount || doc.totalAmount || 0,
-              doc.taxAmount || 0,
-              doc.totalAmount || 0,
-              doc.paymentMethod || "Bank Transfer",
-              (doc.bankName || "BCA") + " - " + (doc.bankAccountNo || "-") + " (a.n " + (doc.bankAccountName || "-") + ")",
-              doc.settlementEstimate || (doc.formType === "FPU" ? "H+7 Setelah Realisasi" : "-"),
-              doc.totalAmount > 10000000 ? "Maker -> CSO -> COO -> CFO -> CEO (Wajib CEO)" : "Maker -> CSO -> COO -> CFO (Selesai di CFO)",
-              doc.status || "Pending Approval",
-              doc.formType === "FPU" ? "Kas Bon Aktif" : "-",
-              doc.notes || "-",
-              doc.googleDrive ? (doc.googleDrive.webViewLink || doc.googleDrive.fileUrl || "-") : "-"
-            ];
+            return buildFormRowArray(doc, idx + 1);
           });
         }
 
         if (rows.length > 0) {
-          // Cari baris pertama yang kosong di bawah Row 8 (header 'No')
-          var colBValues = sheetForms.getRange("B8:B1000").getValues();
-          var count = 0;
-          for (var i = 1; i < colBValues.length; i++) {
-            if (colBValues[i][0] !== "" && colBValues[i][0] !== null) {
-              count++;
+          var lastSheetRow = sheetForms.getLastRow();
+          var existingCount = 0;
+          if (lastSheetRow >= layout.dataStartRow) {
+            var docVals = sheetForms.getRange(layout.dataStartRow, layout.docNumCol, lastSheetRow - layout.dataStartRow + 1, 1).getValues();
+            for (var i = 0; i < docVals.length; i++) {
+              if (String(docVals[i][0] || "").trim() !== "") {
+                existingCount = i + 1;
+              }
             }
           }
-          var startRow = 9 + count;
-          
-          // Beri nomor urut berurutan
+          var startRow = layout.dataStartRow + existingCount;
+
           for (var k = 0; k < rows.length; k++) {
-            rows[k][0] = count + k + 1;
+            rows[k][0] = existingCount + k + 1;
           }
 
-          // Tulis semua baris sekaligus ke Kolom B sampai Kolom T (19 Kolom)
-          sheetForms.getRange(startRow, 2, rows.length, rows[0].length).setValues(rows);
+          sheetForms.getRange(startRow, layout.startCol, rows.length, rows[0].length).setValues(rows);
 
           return ContentService.createTextOutput(JSON.stringify({
             status: "success",
-            message: rows.length + " formulir berhasil dimasukkan ke spreadsheet Rekap Form CLX!",
+            message: rows.length + " formulir berhasil dimasukkan ke sheet " + sheetForms.getName() + "!",
             count: rows.length,
             startRow: startRow,
             sheetTitle: sheetForms.getName()
@@ -745,47 +872,25 @@ export async function syncAllDataToGoogleSheets(
       if (data.action === "append_form" || data.form) {
         var row = data.row;
         if (!row && data.form) {
-          var doc = data.form;
-          row = [
-            doc.sequenceNumber || 1,
-            doc.formType || "FPU",
-            doc.docNumber || "-",
-            doc.date || "",
-            doc.neededDate || doc.date || "",
-            doc.division || "Finance",
-            doc.requesterName || "",
-            doc.purpose || "",
-            doc.subtotalAmount || doc.totalAmount || 0,
-            doc.taxAmount || 0,
-            doc.totalAmount || 0,
-            doc.paymentMethod || "Bank Transfer",
-            (doc.bankName || "BCA") + " - " + (doc.bankAccountNo || "-") + " (a.n " + (doc.bankAccountName || "-") + ")",
-            doc.settlementEstimate || (doc.formType === "FPU" ? "H+7 Setelah Realisasi" : "-"),
-            doc.totalAmount > 10000000 ? "Maker -> CSO -> COO -> CFO -> CEO (Wajib CEO)" : "Maker -> CSO -> COO -> CFO (Selesai di CFO)",
-            doc.status || "Pending CSO",
-            doc.formType === "FPU" ? "Kas Bon Aktif" : "-",
-            doc.notes || "-",
-            doc.googleDrive ? (doc.googleDrive.webViewLink || "-") : "-"
-          ];
+          row = buildFormRowArray(data.form, data.form.sequenceNumber || 1);
         }
 
-        // Hitung baris target di bawah Row 8 (header 'No')
-        var colBValues = sheetForms.getRange("B8:B1000").getValues();
-        var count = 0;
-        for (var i = 1; i < colBValues.length; i++) {
-          if (colBValues[i][0] !== "" && colBValues[i][0] !== null) {
-            count++;
+        var lastR = sheetForms.getLastRow();
+        var filledCount = 0;
+        if (lastR >= layout.dataStartRow) {
+          var colDocVals = sheetForms.getRange(layout.dataStartRow, layout.docNumCol, lastR - layout.dataStartRow + 1, 1).getValues();
+          for (var idx = 0; idx < colDocVals.length; idx++) {
+            if (String(colDocVals[idx][0] || "").trim() !== "") {
+              filledCount = idx + 1;
+            }
           }
         }
-        var targetRow = 9 + count;
-        
-        // Update nomor urut
+        var targetRow = layout.dataStartRow + filledCount;
         if (row && row.length > 0) {
-          row[0] = count + 1;
+          row[0] = filledCount + 1;
         }
 
-        // Tulis tepat pada Kolom B sampai Kolom T (19 Kolom, Kolom A kosong sebagai margin)
-        sheetForms.getRange(targetRow, 2, 1, row.length).setValues([row]);
+        sheetForms.getRange(targetRow, layout.startCol, 1, row.length).setValues([row]);
 
         return ContentService.createTextOutput(JSON.stringify({
           status: "success",
@@ -797,78 +902,62 @@ export async function syncAllDataToGoogleSheets(
 
       // 2. Action: Update Status Approval
       if (data.action === "update_status") {
-        var docNum = data.docNumber;
+        var docNum = String(data.docNumber || "").trim();
         var newStatus = data.status;
         var levelOto = data.levelOtorisasi;
         var statusKasBon = data.statusKasBon;
 
-        var colDValues = sheetForms.getRange("D8:D1000").getValues();
+        var maxR = sheetForms.getLastRow();
         var foundRow = -1;
-        for (var j = 0; j < colDValues.length; j++) {
-          if (colDValues[j][0] == docNum) {
-            foundRow = 8 + j;
-            break;
+        if (maxR >= layout.dataStartRow) {
+          var colDoc = sheetForms.getRange(layout.dataStartRow, layout.docNumCol, maxR - layout.dataStartRow + 1, 1).getValues();
+          for (var j = 0; j < colDoc.length; j++) {
+            if (String(colDoc[j][0] || "").trim() === docNum) {
+              foundRow = layout.dataStartRow + j;
+              break;
+            }
           }
         }
 
         if (foundRow > 0) {
-          if (levelOto) sheetForms.getRange(foundRow, 16).setValue(levelOto); // Col P
-          if (newStatus) sheetForms.getRange(foundRow, 17).setValue(newStatus); // Col Q
-          if (statusKasBon) sheetForms.getRange(foundRow, 18).setValue(statusKasBon); // Col R
+          if (levelOto) sheetForms.getRange(foundRow, layout.startCol + 14).setValue(levelOto);
+          if (newStatus) sheetForms.getRange(foundRow, layout.startCol + 15).setValue(newStatus);
+          if (statusKasBon) sheetForms.getRange(foundRow, layout.startCol + 16).setValue(statusKasBon);
         }
 
         return ContentService.createTextOutput(JSON.stringify({
           status: "success",
-          updatedRow: foundRow
+          updatedRow: foundRow,
+          sheetTitle: sheetForms.getName()
         })).setMimeType(ContentService.MimeType.JSON);
       }
 
       // 2b. Action: Edit / Update Form Data (Perubahan Data oleh User/Maker)
       if (data.action === "update_form" && (data.row || data.form)) {
-        var docNum = data.docNumber || (data.form ? data.form.docNumber : "");
-        var newRow = data.row;
-        if (!newRow && data.form) {
-          var doc = data.form;
-          newRow = [
-            doc.sequenceNumber || 1,
-            doc.formType || "FPP",
-            doc.docNumber || "-",
-            doc.date || "",
-            doc.neededDate || doc.date || "",
-            doc.division || "Finance",
-            doc.requesterName || "",
-            doc.purpose || "",
-            doc.subtotalAmount || doc.totalAmount || 0,
-            doc.taxAmount || 0,
-            doc.totalAmount || 0,
-            doc.paymentMethod || "Bank Transfer",
-            (doc.bankName || "BCA") + " - " + (doc.bankAccountNo || "-") + " (a.n " + (doc.bankAccountName || "-") + ")",
-            doc.settlementEstimate || (doc.formType === "FPU" ? "H+7 Setelah Realisasi" : "-"),
-            doc.totalAmount > 10000000 ? "Maker -> CSO -> COO -> CFO -> CEO (Wajib CEO)" : "Maker -> CSO -> COO -> CFO (Selesai di CFO)",
-            doc.status || "Pending Approval",
-            doc.formType === "FPU" ? "Kas Bon Aktif" : "-",
-            doc.notes || "-",
-            doc.googleDrive ? (doc.googleDrive.webViewLink || doc.googleDrive.fileUrl || "-") : "-"
-          ];
-        }
+        var editDocNum = String(data.docNumber || (data.form ? data.form.docNumber : "")).trim();
+        var newRow = data.row || buildFormRowArray(data.form, data.form.sequenceNumber || 1);
 
-        var colDValues = sheetForms.getRange("D8:D1000").getValues();
-        var foundRow = -1;
-        for (var k = 0; k < colDValues.length; k++) {
-          if (String(colDValues[k][0]).trim() === String(docNum).trim()) {
-            foundRow = 8 + k;
-            break;
+        var maxEditR = sheetForms.getLastRow();
+        var foundEditRow = -1;
+        if (maxEditR >= layout.dataStartRow) {
+          var editColDoc = sheetForms.getRange(layout.dataStartRow, layout.docNumCol, maxEditR - layout.dataStartRow + 1, 1).getValues();
+          for (var m = 0; m < editColDoc.length; m++) {
+            if (String(editColDoc[m][0] || "").trim() === editDocNum) {
+              foundEditRow = layout.dataStartRow + m;
+              break;
+            }
           }
         }
 
-        if (foundRow > 0 && newRow && newRow.length > 0) {
-          var originalSeq = sheetForms.getRange(foundRow, 2).getValue();
+        if (foundEditRow > 0 && newRow && newRow.length > 0) {
+          var originalSeq = sheetForms.getRange(foundEditRow, layout.startCol).getValue();
           if (originalSeq) newRow[0] = originalSeq;
-          sheetForms.getRange(foundRow, 2, 1, newRow.length).setValues([newRow]);
+          sheetForms.getRange(foundEditRow, layout.startCol, 1, newRow.length).setValues([newRow]);
           return ContentService.createTextOutput(JSON.stringify({
             status: "success",
             message: "Perubahan form berhasil disimpan ke Google Sheet!",
-            updatedRow: foundRow
+            updatedRow: foundEditRow,
+            sheetTitle: sheetForms.getName()
           })).setMimeType(ContentService.MimeType.JSON);
         }
       }
@@ -876,44 +965,30 @@ export async function syncAllDataToGoogleSheets(
       // 2c. Action: Delete Form (Sinkronisasi Hapus Baris)
       if (data.action === "delete_form" && data.docNumber) {
         var dNum = String(data.docNumber).trim();
-        var colDValues = sheetForms.getRange("D8:D1000").getValues();
-        for (var m = 0; m < colDValues.length; m++) {
-          if (String(colDValues[m][0]).trim() === dNum) {
-            sheetForms.deleteRow(8 + m);
-            return ContentService.createTextOutput(JSON.stringify({
-              status: "success",
-              message: "Baris formulir berhasil dihapus dari Google Sheet!"
-            })).setMimeType(ContentService.MimeType.JSON);
+        var maxDelR = sheetForms.getLastRow();
+        if (maxDelR >= layout.dataStartRow) {
+          var delColDoc = sheetForms.getRange(layout.dataStartRow, layout.docNumCol, maxDelR - layout.dataStartRow + 1, 1).getValues();
+          for (var d = 0; d < delColDoc.length; d++) {
+            if (String(delColDoc[d][0] || "").trim() === dNum) {
+              sheetForms.deleteRow(layout.dataStartRow + d);
+              return ContentService.createTextOutput(JSON.stringify({
+                status: "success",
+                message: "Baris formulir berhasil dihapus dari Google Sheet!"
+              })).setMimeType(ContentService.MimeType.JSON);
+            }
           }
         }
       }
 
-      // 3. Action: Register User Baru ke Master Login
+      // 3. Action: Register User Baru ke master Login
       if (data.action === "register_user" || data.user) {
-        var userSheet = ss.getSheetByName("Master Login");
-        if (!userSheet) {
-          userSheet = ss.insertSheet("Master Login");
-          userSheet.getRange(1, 1, 1, 8).setValues([[
-            "No", "ID User", "Nama Lengkap", "Email", "Role", "Divisi", "Jabatan", "Waktu Daftar"
-          ]]);
-        }
-        var user = data.user || {};
-        var uRow = data.row || [
-          userSheet.getLastRow(),
-          user.id || "USR-" + new Date().getTime(),
-          user.name || "-",
-          user.email || "-",
-          user.role || "Staff",
-          user.division || "Finance",
-          user.title || "-",
-          user.registeredAt || new Date().toISOString()
-        ];
-        var nextUserRow = Math.max(2, userSheet.getLastRow() + 1);
-        userSheet.getRange(nextUserRow, 1, 1, uRow.length).setValues([uRow]);
+        var userSheet = getMasterLoginSheet(ss);
+        var savedUserRow = syncSingleUserToSheet(userSheet, data.user || {}, data.row);
 
         return ContentService.createTextOutput(JSON.stringify({
           status: "success",
-          sheetTitle: "Master Login"
+          rowNumber: savedUserRow,
+          sheetTitle: userSheet.getName()
         })).setMimeType(ContentService.MimeType.JSON);
       }
 
@@ -923,7 +998,8 @@ export async function syncAllDataToGoogleSheets(
         return ContentService.createTextOutput(JSON.stringify({
           status: "success",
           forms: allForms,
-          total: allForms.length
+          total: allForms.length,
+          sheetTitle: sheetForms.getName()
         })).setMimeType(ContentService.MimeType.JSON);
       }
 
@@ -931,7 +1007,9 @@ export async function syncAllDataToGoogleSheets(
       return ContentService.createTextOutput(JSON.stringify({
         status: "success",
         message: "Koneksi Webhook CLX Aktif!",
-        spreadsheet: ss.getName()
+        spreadsheet: ss.getName(),
+        formsSheet: sheetForms.getName(),
+        masterLoginSheet: getMasterLoginSheet(ss).getName()
       })).setMimeType(ContentService.MimeType.JSON);
 
     } catch (err) {
@@ -943,22 +1021,23 @@ export async function syncAllDataToGoogleSheets(
   }
 
   function getAllFormsJson(ss) {
-    var sheetForms = ss.getSheetByName("Rekap Form CLX") || ss.getSheets()[0];
+    var sheetForms = getFormsSheet(ss);
+    var layout = getFormsSheetLayout(sheetForms);
     var lastRow = sheetForms.getLastRow();
     var formsList = [];
 
-    if (lastRow >= 9) {
-      var numRows = lastRow - 8;
-      var data = sheetForms.getRange(9, 2, numRows, 19).getValues();
+    if (lastRow >= layout.dataStartRow) {
+      var numRows = lastRow - layout.dataStartRow + 1;
+      var data = sheetForms.getRange(layout.dataStartRow, layout.startCol, numRows, 19).getValues();
+      var docIdx = Math.max(0, layout.docNumCol - layout.startCol);
 
       for (var i = 0; i < data.length; i++) {
         var row = data[i];
-        // Col D in spreadsheet is index 2 of range B..T (No Formulir)
-        var docNum = row[2];
+        var docNum = row[docIdx];
         if (docNum && String(docNum).trim() !== "" && String(docNum).trim() !== "-") {
           var seq = row[0] || (i + 1);
           var fType = String(row[1] || "FPP").trim();
-          var docNo = String(row[2]).trim();
+          var docNo = String(docNum).trim();
           var dDate = row[3] instanceof Date ? Utilities.formatDate(row[3], Session.getScriptTimeZone() || "GMT+7", "yyyy-MM-dd") : String(row[3] || "");
           var nDate = row[4] instanceof Date ? Utilities.formatDate(row[4], Session.getScriptTimeZone() || "GMT+7", "yyyy-MM-dd") : String(row[4] || dDate);
           var div = String(row[5] || "Finance").trim();
@@ -970,7 +1049,6 @@ export async function syncAllDataToGoogleSheets(
           var payMethod = String(row[11] || "Bank Transfer").trim();
           var bName = String(row[12] || "").trim();
           var settle = String(row[13] || "-").trim();
-          var levelOto = String(row[14] || "").trim();
           var st = String(row[15] || "Pending Approval").trim();
           var nts = String(row[17] || "").trim();
           var link = String(row[18] || "").trim();
@@ -983,17 +1061,19 @@ export async function syncAllDataToGoogleSheets(
           } else if (st === "Approved by COO") {
             assignee = "CFO";
           } else if (st === "Approved by CFO") {
-            assignee = (total > 10000000) ? "CEO" : "Done";
+            assignee = (total > 10000000) ? "CEO" : "CFO";
           } else if (st === "Fully Approved" || st === "Rejected") {
-            assignee = "Done";
+            assignee = (total > 10000000) ? "CEO" : "CFO";
           }
 
+          var actualRowNum = layout.dataStartRow + i;
           formsList.push({
-            id: "sheet-row-" + (9 + i) + "-" + docNo.replace(/[^a-zA-Z0-9]/g, "_"),
+            id: "sheet-row-" + actualRowNum + "-" + docNo.replace(/[^a-zA-Z0-9]/g, "_"),
             sequenceNumber: Number(seq) || (i + 1),
             formType: (fType === "PFB" ? "FPP" : fType),
             docNumber: docNo,
             date: dDate,
+            targetDate: nDate,
             neededDate: nDate,
             division: div,
             requesterName: reqName,
@@ -1003,17 +1083,19 @@ export async function syncAllDataToGoogleSheets(
             taxAmount: tax,
             paymentMethod: payMethod,
             bankName: bName,
+            settlementDate: settle,
             settlementEstimate: settle,
             notes: nts,
             status: st,
             currentAssigneeRole: assignee,
             googleSheets: {
               synced: true,
-              rowNumber: 9 + i,
+              rowNumber: actualRowNum,
               sheetName: sheetForms.getName()
             },
             googleDrive: {
-              synced: link.indexOf("http") !== -1,
+              uploaded: link.indexOf("http") !== -1,
+              folderPath: link.indexOf("http") === -1 ? link : "",
               fileUrl: link.indexOf("http") !== -1 ? link : undefined
             }
           });
@@ -1028,12 +1110,14 @@ export async function syncAllDataToGoogleSheets(
     try {
       var ss = SpreadsheetApp.getActiveSpreadsheet();
       var formsList = getAllFormsJson(ss);
+      var sheetForms = getFormsSheet(ss);
 
       return ContentService.createTextOutput(JSON.stringify({
         status: "success",
         forms: formsList,
         total: formsList.length,
-        spreadsheet: ss.getName()
+        spreadsheet: ss.getName(),
+        sheetTitle: sheetForms.getName()
       })).setMimeType(ContentService.MimeType.JSON);
     } catch (err) {
       return ContentService.createTextOutput(JSON.stringify({
@@ -1059,6 +1143,7 @@ export async function syncAllDataToGoogleSheets(
       } else {
         localStorage.removeItem(STORAGE_KEY_APPS_SCRIPT_URL);
       }
+      window.dispatchEvent(new CustomEvent('clx-autosync-updated'));
     }
   }
 
@@ -1068,7 +1153,8 @@ export async function syncAllDataToGoogleSheets(
 
   /**
    * Send payload to Google Apps Script Webhook.
-   * Handles CORS redirects seamlessly using text/plain payload and no-cors fallback.
+   * Uses standard text/plain fetch first, then Node server proxy (/api/google/webhook-sync),
+   * and finally browser no-cors fallback on static deployments.
    */
   export async function sendToAppsScriptWebhook(
     payload: any
@@ -1079,7 +1165,7 @@ export async function syncAllDataToGoogleSheets(
     }
 
     try {
-      // First attempt: standard fetch with text/plain body to avoid complex CORS preflights
+      // 1. Direct fetch (gets full JSON confirmation when browser allows Apps Script redirect)
       try {
         const response = await fetch(url, {
           method: 'POST',
@@ -1091,13 +1177,33 @@ export async function syncAllDataToGoogleSheets(
 
         if (response.ok) {
           const resData = await response.json();
+          if (resData?.status === 'error') {
+            return { success: false, error: resData.message || 'Apps Script error' };
+          }
           return { success: true, data: resData };
         }
       } catch (err: any) {
-        console.warn('Standard webhook fetch note, trying no-cors fallback:', err);
+        console.warn('Direct webhook fetch note, trying server proxy:', err);
       }
 
-      // Second attempt: no-cors mode (Google Apps Script always executes even if response is opaque to browser)
+      // 2. Server-side proxy (bypasses browser CORS and reads exact Apps Script JSON)
+      try {
+        const proxyRes = await fetch('/api/google/webhook-sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, payload }),
+        });
+        if (proxyRes.ok) {
+          const proxyJson = await proxyRes.json();
+          if (proxyJson?.success) {
+            return { success: true, data: proxyJson.data };
+          }
+        }
+      } catch (proxyErr) {
+        console.warn('Webhook server proxy unavailable, using no-cors fallback:', proxyErr);
+      }
+
+      // 3. Final fallback for static hosts: no-cors POST
       await fetch(url, {
         method: 'POST',
         mode: 'no-cors',
@@ -1139,7 +1245,7 @@ export async function syncAllDataToGoogleSheets(
           synced: true,
           method: 'webhook',
           rowNumber: webhookRes.data?.rowNumber,
-          sheetTitle: webhookRes.data?.sheetTitle || 'Rekap Form CLX',
+          sheetTitle: webhookRes.data?.sheetTitle || TAB_REKAPAN_FORM,
         };
       }
     }
@@ -1189,15 +1295,37 @@ export async function syncAllDataToGoogleSheets(
   }
 
   /**
-   * Automatic user registration sync to Master Login tab
+   * Automatic user registration sync to "master Login" tab.
+   * Strips base64 signatureUrl image data so webhook payloads stay fast and within Apps Script limits.
    */
   export async function autoSyncUserToGoogleSheet(
     user: User
   ): Promise<boolean> {
+    const { signatureUrl, password: _password, ...safeUser } = user;
+    const signatureStatus = signatureUrl ? 'Terlampir (Sign Digital)' : 'Belum Upload';
+    const userPayload = {
+      ...safeUser,
+      hasSignature: Boolean(signatureUrl),
+      signatureStatus,
+    };
+    const userRow = [
+      1,
+      user.id,
+      user.name,
+      user.email,
+      user.role,
+      user.division || 'Finance',
+      user.title || `${user.role} (${user.division})`,
+      user.phone || '-',
+      signatureStatus,
+      user.registeredAt || new Date().toISOString(),
+    ];
+
     if (isAutoSyncConfigured()) {
       const res = await sendToAppsScriptWebhook({
         action: 'register_user',
-        user,
+        user: userPayload,
+        row: userRow,
       });
       if (res.success) return true;
     }
@@ -1224,6 +1352,11 @@ export async function syncAllDataToGoogleSheets(
     }
 
     const rows = forms.map((doc, idx) => formatFormRow(doc, idx + 1));
+    const safeUsers = (users || []).map(({ signatureUrl, password: _pwd, ...rest }) => ({
+      ...rest,
+      hasSignature: Boolean(signatureUrl),
+      signatureStatus: signatureUrl ? 'Terlampir (Sign Digital)' : 'Belum Upload',
+    }));
 
     try {
       // 1. Try batch sync first
@@ -1231,7 +1364,7 @@ export async function syncAllDataToGoogleSheets(
         action: 'batch_sync',
         forms,
         rows,
-        users,
+        users: safeUsers,
       });
 
       if (batchRes.success) {
@@ -1274,7 +1407,7 @@ export async function syncAllDataToGoogleSheets(
           success: true,
           method: 'webhook',
           count: webRes.count,
-          message: `Berhasil! ${webRes.count} transaksi langsung tersinkronisasi ke Google Spreadsheet Rekap Form CLX via Webhook!`,
+          message: `Berhasil! ${webRes.count} transaksi langsung tersinkronisasi ke Google Spreadsheet ${TAB_REKAPAN_FORM} via Webhook!`,
         };
       }
     }
@@ -1288,7 +1421,7 @@ export async function syncAllDataToGoogleSheets(
             success: true,
             method: 'oauth',
             count: sheetsRes.formsCount,
-            message: `Berhasil! ${sheetsRes.formsCount} formulir masuk ke tab "${sheetsRes.sheetTitle}" (baris 9+) & ${sheetsRes.usersCount} user ke "Master Login"!`,
+            message: `Berhasil! ${sheetsRes.formsCount} formulir masuk ke tab "${sheetsRes.sheetTitle}" (baris 9+) & ${sheetsRes.usersCount} user ke "${TAB_MASTER_LOGIN}"!`,
           };
         }
       } catch (err: any) {
@@ -1309,8 +1442,8 @@ export async function syncAllDataToGoogleSheets(
   }
 
   /**
-   * Read all transactions from Google Sheet via Apps Script Webhook.
-   * This powers the bi-directional sync (menampilkan data dari spreadsheet di web portal).
+   * Read all transactions from Google Sheet via Apps Script Webhook (cache-busted).
+   * This powers the exact 2-way mirroring (menampilkan data dari sheet "Rekapan Form" di web portal).
    */
   export async function fetchFormsFromAppsScriptWebhook(): Promise<{
     success: boolean;
@@ -1323,9 +1456,15 @@ export async function syncAllDataToGoogleSheets(
     }
 
     try {
-      // 1. First attempt: standard GET
+      // 1. Cache-busted GET directly to Apps Script Web App
       try {
-        const getRes = await fetch(url, { method: 'GET', redirect: 'follow' });
+        const sep = url.includes('?') ? '&' : '?';
+        const cacheBustUrl = `${url}${sep}action=get_forms&_t=${Date.now()}`;
+        const getRes = await fetch(cacheBustUrl, {
+          method: 'GET',
+          cache: 'no-store',
+          redirect: 'follow',
+        });
         if (getRes.ok) {
           const data = await getRes.json();
           if (data && Array.isArray(data.forms)) {
@@ -1333,12 +1472,30 @@ export async function syncAllDataToGoogleSheets(
           }
         }
       } catch (getErr) {
-        console.warn('GET from webhook note, trying POST action get_forms:', getErr);
+        console.warn('Direct GET from webhook note, trying server proxy / POST:', getErr);
       }
 
-      // 2. Second attempt: POST with text/plain action 'get_forms'
+      // 2. Server-side proxy attempt (cleanly handles Apps Script redirects if CORS blocks client GET)
+      try {
+        const proxyRes = await fetch('/api/google/webhook-sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, payload: { action: 'get_forms' } }),
+        });
+        if (proxyRes.ok) {
+          const proxyJson = await proxyRes.json();
+          if (proxyJson?.success && Array.isArray(proxyJson?.data?.forms)) {
+            return { success: true, forms: proxyJson.data.forms };
+          }
+        }
+      } catch (proxyErr) {
+        console.warn('Proxy fetch forms note, trying direct POST:', proxyErr);
+      }
+
+      // 3. Direct POST with text/plain action 'get_forms'
       const postRes = await fetch(url, {
         method: 'POST',
+        cache: 'no-store',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action: 'get_forms' }),
       });

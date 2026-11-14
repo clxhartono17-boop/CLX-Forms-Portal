@@ -45,7 +45,7 @@ export const StaffMakerDashboard: React.FC<StaffMakerDashboardProps> = ({
   onCreateNew,
 }) => {
   const { forms, lastSyncedAt } = useForms();
-  const { currentUser } = useAuth();
+  const { currentUser, isAdmin } = useAuth();
 
   const [editingDoc, setEditingDoc] = useState<FormDocument | null>(null);
   const [showAutoSyncModal, setShowAutoSyncModal] = useState(false);
@@ -154,100 +154,102 @@ export const StaffMakerDashboard: React.FC<StaffMakerDashboardProps> = ({
         </button>
       </div>
 
-      {/* Google Sheets Auto-Sync Status Banner */}
-      <div className={`p-4 rounded-xl border transition-all ${
-        autoSyncOn ? 'bg-emerald-50/80 border-emerald-200' : 'bg-slate-50 border-slate-200'
-      }`}>
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div className="flex items-center space-x-3">
-            <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
-              autoSyncOn ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'
-            }`}>
-              <Layers className="w-4 h-4" />
-            </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <span className="text-xs font-bold text-slate-900">
-                  Backend Google Sheet: "Rekap Form CLX"
-                </span>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                  autoSyncOn ? 'bg-emerald-200 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                }`}>
-                  {autoSyncOn ? 'Auto-Sync 2 Arah Aktif' : 'Menunggu Setup Webhook'}
-                </span>
+      {/* Google Sheets Auto-Sync Status Banner (Admin Only: clx.hartono17@gmail.com) */}
+      {isAdmin && (
+        <div className={`p-4 rounded-xl border transition-all ${
+          autoSyncOn ? 'bg-emerald-50/80 border-emerald-200' : 'bg-slate-50 border-slate-200'
+        }`}>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center space-x-3">
+              <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
+                autoSyncOn ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'
+              }`}>
+                <Layers className="w-4 h-4" />
               </div>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                {autoSyncOn ? (
-                  <>
-                    Semua buat form, perubahan (Edit), dan penghapusan baris di spreadsheet otomatis tersinkronisasi secara real-time.
-                    {lastSyncedAt && (
-                      <span className="ml-1 text-emerald-700 font-medium">
-                        (Terakhir cek: {new Date(lastSyncedAt).toLocaleTimeString('id-ID')})
-                      </span>
-                    )}
-                  </>
-                ) : (
-                  <>Klik tombol Setup Auto-Sync di samping untuk mengaktifkan sinkronisasi otomatis tanpa tombol manual.</>
-                )}
-              </p>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <span className="text-xs font-bold text-slate-900">
+                    Backend Google Sheet: "Rekapan Form"
+                  </span>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                    autoSyncOn ? 'bg-emerald-200 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                  }`}>
+                    {autoSyncOn ? 'Auto-Sync 2 Arah Aktif' : 'Menunggu Setup Webhook'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  {autoSyncOn ? (
+                    <>
+                      Semua buat form, perubahan (Edit), dan penghapusan baris di spreadsheet otomatis tersinkronisasi secara real-time.
+                      {lastSyncedAt && (
+                        <span className="ml-1 text-emerald-700 font-medium">
+                          (Terakhir cek: {new Date(lastSyncedAt).toLocaleTimeString('id-ID')})
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <>Klik tombol Setup Auto-Sync di samping untuk mengaktifkan sinkronisasi otomatis tanpa tombol manual.</>
+                  )}
+                </p>
+              </div>
             </div>
-          </div>
 
-          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto shrink-0">
-            {autoSyncOn ? (
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto shrink-0">
+              {autoSyncOn ? (
+                <button
+                  onClick={() => setShowAutoSyncModal(true)}
+                  title="Auto-Sync Webhook aktif. Klik untuk detail webhook backend."
+                  className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 transition shadow-2xs"
+                >
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span className="font-bold">Auto-Sync Aktif</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => setShowAutoSyncModal(true)}
+                  title="Setup Webhook Google Apps Script agar formulir dari portal Vercel otomatis masuk ke spreadsheet secara realtime"
+                  className="inline-flex items-center space-x-1 px-3 py-2 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-slate-950 transition shadow-2xs"
+                >
+                  <Zap className="w-3.5 h-3.5 fill-current" />
+                  <span>Setup Auto-Sync</span>
+                </button>
+              )}
+
               <button
-                onClick={() => setShowAutoSyncModal(true)}
-                title="Auto-Sync Webhook aktif. Klik untuk detail webhook backend."
-                className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 transition shadow-2xs"
+                onClick={() => downloadFormsCsv(forms)}
+                title="Unduh CSV Rekap Form CLX sesuai template kolom Row 8"
+                className="inline-flex items-center space-x-1 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg text-xs font-semibold shadow-2xs transition"
               >
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span className="font-bold">Auto-Sync Aktif</span>
+                <Download className="w-3.5 h-3.5" />
+                <span>CSV</span>
               </button>
-            ) : (
+
+              <a
+                href={SPREADSHEET_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center space-x-1 px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg text-xs font-semibold shadow-2xs transition"
+              >
+                <span>Buka Sheet</span>
+                <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+              </a>
+
               <button
-                onClick={() => setShowAutoSyncModal(true)}
-                title="Setup Webhook Google Apps Script agar formulir dari portal Vercel otomatis masuk ke spreadsheet secara realtime"
-                className="inline-flex items-center space-x-1 px-3 py-2 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-slate-950 transition shadow-2xs"
+                onClick={onCreateNew}
+                className="inline-flex items-center space-x-1 px-3.5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-xs transition"
               >
-                <Zap className="w-3.5 h-3.5 fill-current" />
-                <span>Setup Auto-Sync</span>
+                <PlusCircle className="w-3.5 h-3.5" />
+                <span>Buat Form</span>
               </button>
-            )}
+            </div>
 
-            <button
-              onClick={() => downloadFormsCsv(forms)}
-              title="Unduh CSV Rekap Form CLX sesuai template kolom Row 8"
-              className="inline-flex items-center space-x-1 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg text-xs font-semibold shadow-2xs transition"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>CSV</span>
-            </button>
-
-            <a
-              href={SPREADSHEET_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center space-x-1 px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg text-xs font-semibold shadow-2xs transition"
-            >
-              <span>Buka Sheet</span>
-              <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
-            </a>
-
-            <button
-              onClick={onCreateNew}
-              className="inline-flex items-center space-x-1 px-3.5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-xs transition"
-            >
-              <PlusCircle className="w-3.5 h-3.5" />
-              <span>Buat Form</span>
-            </button>
+            <GoogleAutoSyncModal
+              isOpen={showAutoSyncModal}
+              onClose={() => setShowAutoSyncModal(false)}
+            />
           </div>
-
-          <GoogleAutoSyncModal
-            isOpen={showAutoSyncModal}
-            onClose={() => setShowAutoSyncModal(false)}
-          />
         </div>
-      </div>
+      )}
 
       {/* KPI Cards for Staff */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -333,15 +335,17 @@ export const StaffMakerDashboard: React.FC<StaffMakerDashboardProps> = ({
               <option value="Rejected">Ditolak (Rejected)</option>
             </select>
 
-            <a
-              href={GOOGLE_SHEETS_TEMPLATE_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center space-x-1.5 px-3 py-2 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition"
-            >
-              <span>Sheet Rekapan Form</span>
-              <ExternalLink className="w-3 h-3" />
-            </a>
+            {isAdmin && (
+              <a
+                href={GOOGLE_SHEETS_TEMPLATE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center space-x-1.5 px-3 py-2 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition"
+              >
+                <span>Sheet Rekapan Form</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
           </div>
         </div>
       </div>

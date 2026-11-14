@@ -11,6 +11,7 @@ import {
   GoogleAuthUser
 } from '../utils/googleWorkspace.ts';
 import { User as FirebaseUser } from 'firebase/auth';
+import { ADMIN_EMAIL, isAdminUser, hasMandatoryDigitalSignature } from '../utils/adminAuth.ts';
 
 interface AuthContextType {
   currentUser: User | null;
@@ -32,6 +33,7 @@ interface AuthContextType {
   switchRegisteredUser: (userId: string) => void;
   isCLevel: boolean;
   canApprove: boolean;
+  isAdmin: boolean;
   showAuthModal: boolean;
   setShowAuthModal: (show: boolean) => void;
   authModalMode: 'login' | 'register';
@@ -52,6 +54,17 @@ const ACTIVE_USER_KEY = 'clx_active_user_v4';
 // Pre-registered official C-Level approval officers in Master Login
 // Staff/Maker accounts MUST be registered by the user
 const INITIAL_OFFICERS: User[] = [
+  {
+    id: 'usr_hartono_admin',
+    name: 'Hartono (Admin CLX)',
+    email: ADMIN_EMAIL,
+    password: 'password123',
+    role: 'CEO',
+    division: 'General',
+    title: 'Administrator & CEO',
+    phone: '0811902123',
+    registeredAt: '2026-10-28T08:00:00Z',
+  },
   {
     id: 'usr_hartono_cso',
     name: 'Hartono Darmawan',
@@ -116,7 +129,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+          const existingEmails = new Set(
+            parsed.map((u: User) => (u.email || '').trim().toLowerCase())
+          );
+          const missingDefaults = INITIAL_OFFICERS.filter(
+            officer => !existingEmails.has(officer.email.trim().toLowerCase())
+          );
+          return missingDefaults.length > 0 ? [...missingDefaults, ...parsed] : parsed;
         }
       }
     } catch (e) {
@@ -223,7 +242,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     signatureUrl?: string;
   }): Promise<{ success: boolean; message: string; user: User }> => {
     const cleanEmail = userData.email.trim().toLowerCase();
-    
+
+    // STRICT MANDATORY CHECK: Sign digital must be attached
+    if (!hasMandatoryDigitalSignature(userData.signatureUrl)) {
+      throw new Error(
+        'Pendaftaran gagal: Tanda tangan digital (Sign Digital) bersifat mandatori dan wajib dilampirkan.'
+      );
+    }
+
     // Check if email already registered
     const existing = registeredUsers.find(u => u.email.toLowerCase() === cleanEmail);
     if (existing) {
@@ -248,9 +274,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setRegisteredUsers(prev => [...prev, newUser]);
     setCurrentUser(newUser);
 
-    // Sync to Google Sheet tab "Master Login" via Webhook or OAuth
+    // Sync to Google Sheet tab "master Login" via Webhook or OAuth
     let sheetsSyncSuccess = false;
-    let masterTabName = 'Master Login';
+    let masterTabName = 'master Login';
     try {
       const webhookOk = await autoSyncUserToGoogleSheet(newUser);
       if (webhookOk) {
@@ -323,6 +349,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const currentRole = currentUser?.role || null;
   const isCLevel = !!currentRole && ['CSO', 'COO', 'CFO', 'CEO'].includes(currentRole);
   const canApprove = isCLevel;
+  const isAdmin = isAdminUser(currentUser, googleUser);
   const isGoogleConnected = googleToken !== null || googleUser !== null;
 
   return (
@@ -338,6 +365,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         switchRegisteredUser,
         isCLevel,
         canApprove,
+        isAdmin,
         showAuthModal,
         setShowAuthModal,
         authModalMode,

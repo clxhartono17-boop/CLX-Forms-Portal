@@ -42,11 +42,11 @@ export const GoogleAutoSyncModal: React.FC<GoogleAutoSyncModalProps> = ({
   const { registeredUsers } = useAuth();
   const [urlInput, setUrlInput] = useState('');
   const [copiedCode, setCopiedCode] = useState(false);
+  const [copiedVercelEnv, setCopiedVercelEnv] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [isSyncingExisting, setIsSyncingExisting] = useState(false);
   const [copiedExistingB9, setCopiedExistingB9] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
-  const [activeStep, setActiveStep] = useState<number>(1);
 
   useEffect(() => {
     if (isOpen) {
@@ -258,7 +258,7 @@ export const GoogleAutoSyncModal: React.FC<GoogleAutoSyncModalProps> = ({
                   className="inline-flex items-center space-x-1 text-blue-600 hover:text-blue-800 font-bold text-[11px] mt-1 underline"
                 >
                   <FileSpreadsheet className="w-3.5 h-3.5" />
-                  <span>Buka Spreadsheet: Rekap Form CLX (gid=0)</span>
+                  <span>Buka Spreadsheet: "Rekapan Form" &amp; "master Login" (gid=0)</span>
                   <ExternalLink className="w-3 h-3 ml-0.5" />
                 </a>
               </div>
@@ -323,6 +323,7 @@ export const GoogleAutoSyncModal: React.FC<GoogleAutoSyncModalProps> = ({
                   <li>Jalankan sebagai (Execute as): <strong>Saya (clx.hartono17@gmail.com)</strong></li>
                   <li>Yang memiliki akses (Who has access): <strong className="text-emerald-700">Siapa saja (Anyone)</strong> <em>(Wajib dipilih agar Vercel dapat mengirim data)</em></li>
                   <li>Klik <strong>Terapkan (Deploy)</strong>, setujui izin akun Google Anda, lalu salin <strong>URL Aplikasi Web</strong> yang muncul.</li>
+                  <li className="text-amber-800 font-semibold">Jika sebelumnya sudah pernah deploy, klik <strong>Terapkan &gt; Kelola penerapan &gt; Edit (ikon pensil) &gt; Versi baru (New version)</strong> agar script terbaru v2.1 aktif untuk tab <code>Rekapan Form</code> dan <code>master Login</code>.</li>
                 </ul>
               </div>
             </div>
@@ -367,6 +368,36 @@ export const GoogleAutoSyncModal: React.FC<GoogleAutoSyncModalProps> = ({
                   <AlertCircle className="w-4 h-4 text-red-700 shrink-0 mt-0.5" />
                 )}
                 <span className="leading-relaxed">{testResult.message}</span>
+              </div>
+            )}
+
+            {/* Global Vercel Environment Variable Tip for Staff Browsers */}
+            {urlInput.trim() && (
+              <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-[11px] text-indigo-950">
+                    Agar Semua Browser Staff/Maker Otomatis Sinkron di Vercel:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(`VITE_APPS_SCRIPT_URL=${urlInput.trim()}`);
+                        setCopiedVercelEnv(true);
+                        setTimeout(() => setCopiedVercelEnv(false), 3000);
+                      } catch {
+                        // ignore
+                      }
+                    }}
+                    className="inline-flex items-center space-x-1 px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-[10px] font-bold transition"
+                  >
+                    {copiedVercelEnv ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                    <span>{copiedVercelEnv ? 'Tersalin!' : 'Salin Env Vercel'}</span>
+                  </button>
+                </div>
+                <p className="text-[10px] text-indigo-900 leading-relaxed">
+                  Tambahkan <code>VITE_APPS_SCRIPT_URL</code> di <strong>Vercel Project Settings &gt; Environment Variables</strong> lalu redeploy agar pendaftaran ke <code>master Login</code> dan mirroring <code>Rekapan Form</code> berjalan otomatis di seluruh perangkat karyawan tanpa setup ulang.
+                </p>
               </div>
             )}
 

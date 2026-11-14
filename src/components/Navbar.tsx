@@ -22,7 +22,7 @@ interface NavbarProps {
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenRegister }) => {
-  const { currentUser, currentRole, switchRegisteredUser, registeredUsers, logout, setShowAuthModal, isCLevel } = useAuth();
+  const { currentUser, currentRole, switchRegisteredUser, registeredUsers, logout, setShowAuthModal, isCLevel, isAdmin } = useAuth();
   const { pendingCountForUser } = useForms();
 
   const myPendingCount = currentRole ? pendingCountForUser(currentRole) : 0;
@@ -122,26 +122,30 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenR
 
           {/* User Account / Role & Registration */}
           <div className="flex items-center space-x-2 shrink-0">
-            {/* Auto-Sync Backend Status */}
-            <button
-              onClick={() => setShowAutoSyncModal(true)}
-              title="Status Sinkronisasi Otomatis Google Sheets Backend"
-              className={`inline-flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition shadow-2xs border whitespace-nowrap ${
-                autoSyncOn
-                  ? 'bg-emerald-950/90 border-emerald-500/80 text-emerald-300 hover:bg-emerald-900'
-                  : 'bg-blue-950/80 border-blue-600/70 text-blue-300 hover:bg-blue-900'
-              }`}
-            >
-              <Zap className={`w-3.5 h-3.5 ${autoSyncOn ? 'text-emerald-400' : 'text-amber-400'}`} />
-              <span className="hidden sm:inline">
-                {autoSyncOn ? 'Auto-Sync Aktif' : 'Auto-Sync Sheet'}
-              </span>
-            </button>
+            {/* Auto-Sync Backend Setup: Admin Only (clx.hartono17@gmail.com) */}
+            {isAdmin && (
+              <>
+                <button
+                  onClick={() => setShowAutoSyncModal(true)}
+                  title="Status Sinkronisasi Otomatis Google Sheets Backend (Khusus Admin)"
+                  className={`inline-flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition shadow-2xs border whitespace-nowrap ${
+                    autoSyncOn
+                      ? 'bg-emerald-950/90 border-emerald-500/80 text-emerald-300 hover:bg-emerald-900'
+                      : 'bg-blue-950/80 border-blue-600/70 text-blue-300 hover:bg-blue-900'
+                  }`}
+                >
+                  <Zap className={`w-3.5 h-3.5 ${autoSyncOn ? 'text-emerald-400' : 'text-amber-400'}`} />
+                  <span className="hidden sm:inline">
+                    {autoSyncOn ? 'Auto-Sync Aktif' : 'Auto-Sync Sheet'}
+                  </span>
+                </button>
 
-            <GoogleAutoSyncModal
-              isOpen={showAutoSyncModal}
-              onClose={() => setShowAutoSyncModal(false)}
-            />
+                <GoogleAutoSyncModal
+                  isOpen={showAutoSyncModal}
+                  onClose={() => setShowAutoSyncModal(false)}
+                />
+              </>
+            )}
 
             {currentUser ? (
               <>

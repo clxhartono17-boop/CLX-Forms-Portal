@@ -10,7 +10,7 @@ export const GOOGLE_SHEETS_TEMPLATE_ID = '1irb4RR0LMMBqRfGP4gxvX82c0nLfWIXKHzQ_t
 export const GOOGLE_SHEETS_TEMPLATE_URL = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEETS_TEMPLATE_ID}/edit?gid=0#gid=0`;
 
 export const SHEET_TAB_REKAPAN_FORM = 'Rekapan Form';
-export const SHEET_TAB_MASTER_LOGIN = 'Master Login';
+export const SHEET_TAB_MASTER_LOGIN = 'master Login';
 
 // Unified internal API URL on port 3000
 const API_BASE_URL = '/api/google';
@@ -153,16 +153,19 @@ export async function syncUserRegistrationToGoogleSheets(
   user: User
 ): Promise<GoogleSheetsSyncResult> {
   const sheetName = SHEET_TAB_MASTER_LOGIN;
+  const { signatureUrl, password: _password, ...safeUser } = user;
 
   const rowData = [
+    1,
     user.id,
     user.name,
     user.email,
     user.role,
     user.division || 'General',
+    user.title || `${user.role} (${user.division})`,
     user.phone || '-',
+    signatureUrl ? 'Terlampir (Sign Digital)' : 'Belum Upload',
     user.registeredAt || new Date().toISOString(),
-    'Active',
   ];
 
   const res = await fetch(`${API_BASE_URL}/register-user`, {
@@ -171,7 +174,11 @@ export async function syncUserRegistrationToGoogleSheets(
     body: JSON.stringify({
       spreadsheetId: GOOGLE_SHEETS_TEMPLATE_ID,
       sheetName,
-      user: user,
+      user: {
+        ...safeUser,
+        hasSignature: Boolean(signatureUrl),
+        signatureStatus: signatureUrl ? 'Terlampir (Sign Digital)' : 'Belum Upload',
+      },
       row: rowData,
     }),
   });
