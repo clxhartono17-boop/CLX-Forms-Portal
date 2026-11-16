@@ -1,7 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { UserRole, Division } from '../types/index.ts';
-import { hasMandatoryDigitalSignature } from '../utils/adminAuth.ts';
+import {
+  hasMandatoryDigitalSignature,
+  getAllowedRegistrationRoles,
+  isAdminOnlyRole,
+} from '../utils/adminAuth.ts';
 import { 
   UserCheck, 
   UserPlus, 
@@ -22,6 +26,14 @@ interface AuthModalProps {
   initialMode?: 'login' | 'register';
 }
 
+const ROLE_OPTIONS_LABELS: Record<UserRole, string> = {
+  Staff: 'Staff (Maker)',
+  CSO: 'CSO (Chief Strategy Officer)',
+  COO: 'COO (Chief Operating Officer)',
+  CFO: 'CFO (Chief Financial Officer)',
+  CEO: 'CEO (Chief Executive Officer)',
+};
+
 export const AuthModal: React.FC<AuthModalProps> = ({
   isOpen,
   onClose,
@@ -29,10 +41,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 }) => {
   const { 
     registerUser, 
-    loginUser
+    loginUser,
+    isAdmin,
+    authModalMode,
+    setAuthModalMode,
   } = useAuth();
 
-  const [mode, setMode] = useState<'login' | 'register'>(initialMode);
+  const [mode, setMode] = useState<'login' | 'register'>(authModalMode || initialMode);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -43,6 +58,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [signatureError, setSignatureError] = useState(false);
   const [feedback, setFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const allowedRoles = getAllowedRegistrationRoles(isAdmin);
+
+  useEffect(() => {
+    if (isOpen) {
+      setMode(authModalMode || initialMode);
+      setFeedback(null);
+    }
+  }, [isOpen, authModalMode, initialMode]);
+
+  useEffect(() => {
+    if (!isAdmin && isAdminOnlyRole(role)) {
+      setRole('Staff');
+    }
+  }, [isAdmin, role]);
 
   if (!isOpen) return null;
 
@@ -174,6 +204,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             type="button"
             onClick={() => {
               setMode('register');
+              setAuthModalMode('register');
               setFeedback(null);
             }}
             className={`py-3 transition border-b-2 ${
@@ -192,6 +223,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             type="button"
             onClick={() => {
               setMode('login');
+              setAuthModalMode('login');
               setFeedback(null);
             }}
             className={`py-3 transition border-b-2 ${
@@ -282,16 +314,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     Peran / Otoritas <span className="text-red-500">*</span>
                   </label>
                   <select
+                    aria-label="Peran / Otoritas"
                     value={role}
                     onChange={e => setRole(e.target.value as UserRole)}
                     className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:bg-white text-slate-800 font-bold"
                   >
-                    <option value="Staff">Staff (Maker)</option>
-                    <option value="CSO">CSO (Chief Strategy Officer)</option>
-                    <option value="COO">COO (Chief Operating Officer)</option>
-                    <option value="CFO">CFO (Chief Financial Officer)</option>
-                    <option value="CEO">CEO (Chief Executive Officer)</option>
+                    {allowedRoles.map(r => (
+                      <option key={r} value={r}>
+                        {ROLE_OPTIONS_LABELS[r]}
+                      </option>
+                    ))}
                   </select>
+                  {!isAdmin && (
+                    <p
+                      data-testid="role-admin-restriction-note"
+                      className="text-[10px] text-amber-700 mt-1 leading-tight"
+                    >
+                      Role eksekutif (COO, CFO, CEO) hanya dapat ditetapkan oleh Admin.
+                    </p>
+                  )}
                 </div>
               </div>
 

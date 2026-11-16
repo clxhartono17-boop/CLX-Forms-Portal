@@ -7,3 +7,4 @@ coverage/
 .env*
 !.env.example
 .clx-sync-config.json
+.clx-users.json

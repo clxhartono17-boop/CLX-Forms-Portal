@@ -9,10 +9,10 @@ import { ApprovalQueue } from './components/ApprovalQueue.tsx';
 import { FormDetailsModal } from './components/FormDetailsModal.tsx';
 import { AuthModal } from './components/AuthModal.tsx';
 import { FormDocument } from './types/index.ts';
-import { ShieldCheck, PlusCircle, LogIn, Lock } from 'lucide-react';
+import { ShieldCheck, PlusCircle, LogIn, Lock, UserPlus } from 'lucide-react';
 
 function MainApp() {
-  const { showAuthModal, setShowAuthModal, currentUser, isCLevel } = useAuth();
+  const { showAuthModal, setShowAuthModal, setAuthModalMode, currentUser, isCLevel } = useAuth();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'create' | 'approvals'>('dashboard');
   const [selectedDoc, setSelectedDoc] = useState<FormDocument | null>(null);
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' } | null>(null);
@@ -43,7 +43,10 @@ function MainApp() {
       <Navbar 
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
-        onOpenRegister={() => setShowAuthModal(true)}
+        onOpenRegister={() => {
+          setAuthModalMode('register');
+          setShowAuthModal(true);
+        }}
       />
 
       {/* Notification Toast */}
@@ -93,11 +96,24 @@ function MainApp() {
 
               <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
                 <button
-                  onClick={() => setShowAuthModal(true)}
+                  onClick={() => {
+                    setAuthModalMode('login');
+                    setShowAuthModal(true);
+                  }}
                   className="w-full sm:w-auto px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm transition flex items-center justify-center space-x-1.5"
                 >
                   <LogIn className="w-4 h-4" />
                   <span>Masuk / Login Akun</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setAuthModalMode('register');
+                    setShowAuthModal(true);
+                  }}
+                  className="w-full sm:w-auto px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-xs transition flex items-center justify-center space-x-1.5"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>Daftar Akun Baru</span>
                 </button>
                 <button
                   onClick={() => setActiveTab('create')}

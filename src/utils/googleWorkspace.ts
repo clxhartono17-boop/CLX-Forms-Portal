@@ -1475,6 +1475,10 @@ export async function syncAllDataToGoogleSheets(
       user.registeredAt || new Date().toISOString(),
     ];
 
+    if (!isAutoSyncConfigured()) {
+      await syncWebhookConfigWithServer();
+    }
+
     if (isAutoSyncConfigured()) {
       const res = await sendToAppsScriptWebhook({
         action: 'register_user',

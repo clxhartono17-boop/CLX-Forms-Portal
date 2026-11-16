@@ -10,9 +10,11 @@ import {
   UserPlus, 
   LogOut, 
   LogIn,
-  Zap
+  Zap,
+  Users
 } from 'lucide-react';
 import { GoogleAutoSyncModal } from './GoogleAutoSyncModal.tsx';
+import { UserRoleManagementModal } from './UserRoleManagementModal.tsx';
 import { isAutoSyncConfigured } from '../utils/googleWorkspace.ts';
 
 interface NavbarProps {
@@ -22,11 +24,22 @@ interface NavbarProps {
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenRegister }) => {
-  const { currentUser, currentRole, switchRegisteredUser, registeredUsers, logout, setShowAuthModal, isCLevel, isAdmin } = useAuth();
+  const {
+    currentUser,
+    currentRole,
+    switchRegisteredUser,
+    registeredUsers,
+    logout,
+    setShowAuthModal,
+    setAuthModalMode,
+    isCLevel,
+    isAdmin,
+  } = useAuth();
   const { pendingCountForUser } = useForms();
 
   const myPendingCount = currentRole ? pendingCountForUser(currentRole) : 0;
   const [showAutoSyncModal, setShowAutoSyncModal] = React.useState(false);
+  const [showRoleModal, setShowRoleModal] = React.useState(false);
   const autoSyncOn = isAutoSyncConfigured();
 
   // Format clean role and title without repetition
@@ -122,9 +135,19 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenR
 
           {/* User Account / Role & Registration */}
           <div className="flex items-center space-x-2 shrink-0">
-            {/* Auto-Sync Backend Setup: Admin Only (clx.hartono17@gmail.com) */}
+            {/* Auto-Sync & Role Management: Admin Only (clx.hartono17@gmail.com) */}
             {isAdmin && (
               <>
+                <button
+                  onClick={() => setShowRoleModal(true)}
+                  data-testid="manage-roles-btn"
+                  title="Kelola Role Pengguna (Tetapkan CEO, COO, CFO - Khusus Admin)"
+                  className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition shadow-2xs border whitespace-nowrap bg-indigo-950/90 border-indigo-600/80 text-indigo-200 hover:bg-indigo-900"
+                >
+                  <Users className="w-3.5 h-3.5 text-indigo-400" />
+                  <span className="hidden sm:inline">Kelola Role</span>
+                </button>
+
                 <button
                   onClick={() => setShowAutoSyncModal(true)}
                   title="Status Sinkronisasi Otomatis Google Sheets Backend (Khusus Admin)"
@@ -144,13 +167,26 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenR
                   isOpen={showAutoSyncModal}
                   onClose={() => setShowAutoSyncModal(false)}
                 />
+
+                <UserRoleManagementModal
+                  isOpen={showRoleModal}
+                  onClose={() => setShowRoleModal(false)}
+                  onOpenRegisterNewUser={() => {
+                    setAuthModalMode('register');
+                    setShowAuthModal(true);
+                  }}
+                />
               </>
             )}
 
             {currentUser ? (
               <>
                 <button
-                  onClick={() => onOpenRegister ? onOpenRegister() : setShowAuthModal(true)}
+                  onClick={() => {
+                    setAuthModalMode('register');
+                    if (onOpenRegister) onOpenRegister();
+                    else setShowAuthModal(true);
+                  }}
                   className="inline-flex items-center space-x-1 px-2.5 py-1.5 text-xs font-bold text-blue-200 bg-blue-950/80 hover:bg-blue-900 border border-blue-800 rounded-lg transition whitespace-nowrap"
                 >
                   <UserPlus className="w-3.5 h-3.5 text-blue-400" />
@@ -166,22 +202,33 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenR
                   </span>
                 </div>
 
-                {/* Account Switcher - Only from Master Login registered accounts */}
-                <div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 max-w-[190px]">
-                  <Shield className="w-3.5 h-3.5 text-blue-400 mr-1.5 shrink-0" />
-                  <select
-                    aria-label="Akun terdaftar"
-                    value={currentUser.id}
-                    onChange={e => switchRegisteredUser(e.target.value)}
-                    className="bg-transparent text-xs font-bold text-blue-300 focus:outline-none cursor-pointer pr-1 w-full truncate"
+                {isAdmin ? (
+                  <div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 max-w-[190px]">
+                    <Shield className="w-3.5 h-3.5 text-blue-400 mr-1.5 shrink-0" />
+                    <select
+                      aria-label="Akun terdaftar"
+                      value={currentUser.id}
+                      onChange={e => switchRegisteredUser(e.target.value)}
+                      className="bg-transparent text-xs font-bold text-blue-300 focus:outline-none cursor-pointer pr-1 w-full truncate"
+                    >
+                      {registeredUsers.map(u => (
+                        <option key={u.id} value={u.id} className="bg-slate-900 text-white">
+                          {u.name} ({u.role})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div
+                    data-testid="active-user-badge"
+                    className="flex items-center bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 max-w-[200px]"
                   >
-                    {registeredUsers.map(u => (
-                      <option key={u.id} value={u.id} className="bg-slate-900 text-white">
-                        {u.name} ({u.role})
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                    <Shield className="w-3.5 h-3.5 text-blue-400 mr-1.5 shrink-0" />
+                    <span className="text-xs font-bold text-blue-200 truncate">
+                      {currentUser.name} ({currentUser.role})
+                    </span>
+                  </div>
+                )}
 
                 <button
                   onClick={logout}
@@ -195,14 +242,21 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenR
             ) : (
               <div className="flex items-center space-x-2">
                 <button
-                  onClick={() => setShowAuthModal(true)}
+                  onClick={() => {
+                    setAuthModalMode('login');
+                    setShowAuthModal(true);
+                  }}
                   className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition shadow-xs"
                 >
                   <LogIn className="w-3.5 h-3.5" />
                   <span>Masuk / Login</span>
                 </button>
                 <button
-                  onClick={() => onOpenRegister ? onOpenRegister() : setShowAuthModal(true)}
+                  onClick={() => {
+                    setAuthModalMode('register');
+                    if (onOpenRegister) onOpenRegister();
+                    else setShowAuthModal(true);
+                  }}
                   className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 text-xs font-bold text-blue-200 bg-blue-950/80 hover:bg-blue-900 border border-blue-800 rounded-lg transition"
                 >
                   <UserPlus className="w-3.5 h-3.5 text-blue-400" />

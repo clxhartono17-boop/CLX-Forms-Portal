@@ -6,6 +6,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { parseSheetRowsToForms } from './src/utils/sheetSyncMirror.ts';
+import { canAssignRole, isAdminUser } from './src/utils/adminAuth.ts';
+import type { User, UserRole } from './src/types/index.ts';
 
 dotenv.config();
 
@@ -22,6 +24,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 // Target Google Sheets ID
 const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID || '1irb4RR0LMMBqRfGP4gxvX82c0nLfWIXKHzQ_tqC3h8c';
 const SYNC_CONFIG_PATH = path.resolve(__dirname, '.clx-sync-config.json');
+const USERS_STORE_PATH = path.resolve(__dirname, '.clx-users.json');
 
 interface ServerSyncConfig {
   webhookUrl: string;
@@ -61,6 +64,27 @@ function writeServerSyncConfig(webhookUrl: string): ServerSyncConfig {
     console.warn('[SyncConfig] Failed writing .clx-sync-config.json:', err);
   }
   return next;
+}
+
+function readServerUsers(): User[] {
+  try {
+    if (fs.existsSync(USERS_STORE_PATH)) {
+      const raw = fs.readFileSync(USERS_STORE_PATH, 'utf8');
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    }
+  } catch (err) {
+    console.warn('[UsersStore] Failed reading .clx-users.json:', err);
+  }
+  return [];
+}
+
+function writeServerUsers(users: User[]): void {
+  try {
+    fs.writeFileSync(USERS_STORE_PATH, JSON.stringify(users, null, 2), 'utf8');
+  } catch (err) {
+    console.warn('[UsersStore] Failed writing .clx-users.json:', err);
+  }
 }
 
 function getEffectiveWebhookUrl(requestUrl?: string): string {
@@ -330,6 +354,109 @@ app.post('/api/google/register-user', async (req, res) => {
   } catch (error: any) {
     console.error('Error registering user to sheets:', error.message || error);
     return res.status(502).json({ success: false, error: error.message });
+  }
+});
+
+// 4b. GET / POST / PATCH: Shared User Registration & Admin-Only Role Assignment
+app.get('/api/users', (_req, res) => {
+  return res.json({ success: true, users: readServerUsers() });
+});
+
+app.post('/api/users/register', async (req, res) => {
+  try {
+    const incoming = req.body?.user as User | undefined;
+    const requesterEmail = String(req.body?.requesterEmail || '');
+
+    if (!incoming || !incoming.email || !incoming.name) {
+      return res.status(400).json({ success: false, error: 'Nama dan email wajib diisi.' });
+    }
+
+    const callerIsAdmin = isAdminUser({ email: requesterEmail });
+    if (!canAssignRole(incoming.role, callerIsAdmin)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Otoritas ditolak: Role COO, CFO, dan CEO hanya dapat ditetapkan oleh Admin (clx.hartono17@gmail.com).',
+      });
+    }
+
+    const cleanEmail = incoming.email.trim().toLowerCase();
+    const existing = readServerUsers();
+    if (existing.some(u => (u.email || '').trim().toLowerCase() === cleanEmail)) {
+      return res.status(409).json({
+        success: false,
+        error: `Email ${cleanEmail} sudah terdaftar di sistem.`,
+      });
+    }
+
+    const userToStore: User = {
+      ...incoming,
+      email: cleanEmail,
+      registeredAt: incoming.registeredAt || new Date().toISOString(),
+    };
+    writeServerUsers([...existing, userToStore]);
+
+    return res.json({ success: true, user: userToStore });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error?.message || 'Gagal menyimpan registrasi user.' });
+  }
+});
+
+app.patch('/api/users/:id/role', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const newRole = req.body?.role as UserRole;
+    const newTitle = String(req.body?.title || '').trim();
+    const requesterEmail = String(req.body?.requesterEmail || '');
+    const userFallback = req.body?.userFallback as User | undefined;
+
+    if (!isAdminUser({ email: requesterEmail })) {
+      return res.status(403).json({
+        success: false,
+        error: 'Otoritas ditolak: Hanya Admin (clx.hartono17@gmail.com) yang dapat mengubah role pengguna.',
+      });
+    }
+
+    if (!['Staff', 'CSO', 'COO', 'CFO', 'CEO'].includes(newRole)) {
+      return res.status(400).json({ success: false, error: 'Role tidak valid.' });
+    }
+
+    const users = readServerUsers();
+    let idx = users.findIndex(u => u.id === id);
+    if (idx === -1 && userFallback?.email) {
+      const cleanFbEmail = userFallback.email.trim().toLowerCase();
+      idx = users.findIndex(u => (u.email || '').trim().toLowerCase() === cleanFbEmail);
+      if (idx === -1) {
+        users.push({ ...userFallback, email: cleanFbEmail });
+        idx = users.length - 1;
+      }
+    }
+
+    if (idx === -1) {
+      return res.status(404).json({ success: false, error: 'Pengguna tidak ditemukan.' });
+    }
+
+    const updatedUser: User = {
+      ...users[idx],
+      role: newRole,
+      title: newTitle || `${newRole} (${users[idx].division || 'General'})`,
+    };
+    users[idx] = updatedUser;
+    writeServerUsers(users);
+
+    // Sync updated role to Google Sheet master Login if webhook is active
+    const targetUrl = getEffectiveWebhookUrl();
+    if (targetUrl) {
+      const { signatureUrl, password: _pwd, ...safeUser } = updatedUser;
+      const sigStatus = signatureUrl ? 'Terlampir (Sign Digital)' : 'Belum Upload';
+      forwardToAppsScriptWebhook(targetUrl, {
+        action: 'register_user',
+        user: { ...safeUser, hasSignature: Boolean(signatureUrl), signatureStatus: sigStatus },
+      }).catch(err => console.warn('Sheet role sync note:', err));
+    }
+
+    return res.json({ success: true, user: updatedUser });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error?.message || 'Gagal memperbarui role pengguna.' });
   }
 });
 

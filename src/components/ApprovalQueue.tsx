@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 
 export const ApprovalQueue: React.FC = () => {
-  const { currentUser, currentRole, switchRegisteredUser, registeredUsers } = useAuth();
+  const { currentUser, currentRole, switchRegisteredUser, registeredUsers, isAdmin } = useAuth();
   const { forms, approveForm, rejectForm, getPendingApprovalsForRole } = useForms();
 
   const [activeTab, setActiveTab] = useState<'my_pending' | 'all_pending'>('my_pending');
@@ -103,22 +103,24 @@ export const ApprovalQueue: React.FC = () => {
           </p>
         </div>
 
-        {/* Quick Switch between Registered Accounts from Master Login */}
-        <div className="flex items-center space-x-2 bg-slate-800 p-2 rounded-lg border border-slate-700 text-xs">
-          <Shield className="w-4 h-4 text-blue-400" />
-          <span className="text-slate-300 font-semibold hidden sm:inline">Ganti Akun:</span>
-          <select
-            value={currentUser?.id || ''}
-            onChange={e => switchRegisteredUser(e.target.value)}
-            className="bg-slate-900 text-blue-300 font-bold px-2 py-1 rounded border border-slate-700 focus:outline-none"
-          >
-            {registeredUsers.map(u => (
-              <option key={u.id} value={u.id}>
-                {u.name} ({u.role})
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* Quick Switch between Registered Accounts (Admin Only) */}
+        {isAdmin && (
+          <div className="flex items-center space-x-2 bg-slate-800 p-2 rounded-lg border border-slate-700 text-xs">
+            <Shield className="w-4 h-4 text-blue-400" />
+            <span className="text-slate-300 font-semibold hidden sm:inline">Ganti Akun:</span>
+            <select
+              value={currentUser?.id || ''}
+              onChange={e => switchRegisteredUser(e.target.value)}
+              className="bg-slate-900 text-blue-300 font-bold px-2 py-1 rounded border border-slate-700 focus:outline-none"
+            >
+              {registeredUsers.map(u => (
+                <option key={u.id} value={u.id}>
+                  {u.name} ({u.role})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {actionSuccess && (
@@ -144,19 +146,21 @@ export const ApprovalQueue: React.FC = () => {
           <p className="text-xs text-amber-700 max-w-lg mx-auto">
             Menu "Pending Approvals" dikhususkan untuk akun eksekutif C-Level (CSO, COO, CFO, CEO) untuk memvalidasi dan membubuhkan stempel digital.
           </p>
-          <div className="pt-2 flex flex-wrap justify-center gap-2">
-            {registeredUsers
-              .filter(u => u.role !== 'Staff')
-              .map(u => (
-                <button
-                  key={u.id}
-                  onClick={() => switchRegisteredUser(u.id)}
-                  className="px-3 py-1.5 bg-white border border-amber-300 hover:bg-amber-100 text-amber-900 text-xs font-bold rounded-lg transition"
-                >
-                  Beralih ke akun {u.name} ({u.role})
-                </button>
-              ))}
-          </div>
+          {isAdmin && (
+            <div className="pt-2 flex flex-wrap justify-center gap-2">
+              {registeredUsers
+                .filter(u => u.role !== 'Staff')
+                .map(u => (
+                  <button
+                    key={u.id}
+                    onClick={() => switchRegisteredUser(u.id)}
+                    className="px-3 py-1.5 bg-white border border-amber-300 hover:bg-amber-100 text-amber-900 text-xs font-bold rounded-lg transition"
+                  >
+                    Beralih ke akun {u.name} ({u.role})
+                  </button>
+                ))}
+            </div>
+          )}
         </div>
       ) : (
         <>

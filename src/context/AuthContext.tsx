@@ -8,10 +8,15 @@ import {
   appendUserToMasterLogin,
   getGoogleAccessToken,
   autoSyncUserToGoogleSheet,
+  hasServerSyncCapability,
   GoogleAuthUser
 } from '../utils/googleWorkspace.ts';
-import { User as FirebaseUser } from 'firebase/auth';
-import { ADMIN_EMAIL, isAdminUser, hasMandatoryDigitalSignature } from '../utils/adminAuth.ts';
+import { 
+  ADMIN_EMAIL, 
+  isAdminUser, 
+  hasMandatoryDigitalSignature,
+  canAssignRole,
+} from '../utils/adminAuth.ts';
 
 interface AuthContextType {
   currentUser: User | null;
@@ -28,6 +33,8 @@ interface AuthContextType {
     title?: string;
     signatureUrl?: string;
   }) => Promise<{ success: boolean; message: string; user: User }>;
+  updateUserRole: (userId: string, newRole: UserRole, newTitle?: string) => Promise<User>;
+  refreshRegisteredUsers: () => Promise<void>;
   loginUser: (email: string, password?: string) => { success: boolean; message: string };
   logout: () => void;
   switchRegisteredUser: (userId: string) => void;
@@ -52,7 +59,7 @@ const REGISTERED_USERS_KEY = 'clx_registered_users_v4';
 const ACTIVE_USER_KEY = 'clx_active_user_v4';
 
 // Pre-registered official C-Level approval officers in Master Login
-// Staff/Maker accounts MUST be registered by the user
+// Staff/Maker & CSO accounts can be freely registered by anyone; CEO/COO/CFO are Admin-only
 const INITIAL_OFFICERS: User[] = [
   {
     id: 'usr_hartono_admin',
@@ -122,6 +129,21 @@ const INITIAL_OFFICERS: User[] = [
   },
 ];
 
+function mergeUsersByEmail(baseUsers: User[], incomingUsers: User[]): User[] {
+  const byEmail = new Map<string, User>();
+  for (const u of baseUsers) {
+    const key = (u.email || '').trim().toLowerCase();
+    if (key) byEmail.set(key, u);
+  }
+  for (const u of incomingUsers) {
+    const key = (u.email || '').trim().toLowerCase();
+    if (!key) continue;
+    const prev = byEmail.get(key);
+    byEmail.set(key, prev ? { ...prev, ...u } : u);
+  }
+  return Array.from(byEmail.values());
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [registeredUsers, setRegisteredUsers] = useState<User[]>(() => {
     try {
@@ -129,13 +151,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const existingEmails = new Set(
-            parsed.map((u: User) => (u.email || '').trim().toLowerCase())
-          );
-          const missingDefaults = INITIAL_OFFICERS.filter(
-            officer => !existingEmails.has(officer.email.trim().toLowerCase())
-          );
-          return missingDefaults.length > 0 ? [...missingDefaults, ...parsed] : parsed;
+          return mergeUsersByEmail(INITIAL_OFFICERS, parsed);
         }
       }
     } catch (e) {
@@ -166,6 +182,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Google Workspace Auth State
   const [googleUser, setGoogleUser] = useState<GoogleAuthUser | null>(null);
   const [googleToken, setGoogleToken] = useState<string | null>(null);
+
+  const refreshRegisteredUsers = async () => {
+    try {
+      const res = await fetch('/api/users', { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data?.success && Array.isArray(data.users) && data.users.length > 0) {
+        setRegisteredUsers(prev => {
+          const merged = mergeUsersByEmail(prev, data.users);
+          setCurrentUser(curr => {
+            if (!curr) return curr;
+            const match = merged.find(
+              u => u.email.trim().toLowerCase() === curr.email.trim().toLowerCase()
+            );
+            return match ? { ...curr, role: match.role, title: match.title } : curr;
+          });
+          return merged;
+        });
+      }
+    } catch {
+      // Static deploy without Node API: continue with localStorage users
+    }
+  };
+
+  useEffect(() => {
+    refreshRegisteredUsers();
+    const onFocus = () => {
+      if (document.visibilityState === 'visible') {
+        refreshRegisteredUsers();
+      }
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
+    };
+  }, []);
 
   useEffect(() => {
     const unsubscribe = initGoogleAuth(
@@ -245,6 +299,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     signatureUrl?: string;
   }): Promise<{ success: boolean; message: string; user: User }> => {
     const cleanEmail = userData.email.trim().toLowerCase();
+    const callerIsAdmin = isAdminUser(currentUser, googleUser);
+
+    // Enforce Admin-only restriction for CEO, COO, and CFO roles
+    if (!canAssignRole(userData.role, callerIsAdmin)) {
+      throw new Error(
+        'Otoritas ditolak: Role COO, CFO, dan CEO hanya dapat ditentukan oleh Admin (clx.hartono17@gmail.com).'
+      );
+    }
 
     // STRICT MANDATORY CHECK: Sign digital must be attached
     if (!hasMandatoryDigitalSignature(userData.signatureUrl)) {
@@ -273,9 +335,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       signatureUrl: userData.signatureUrl,
     };
 
+    // Persist to shared Node server store so Admin & other devices see new registrations immediately
+    try {
+      const srvRes = await fetch('/api/users/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user: newUser,
+          requesterEmail: currentUser?.email || googleUser?.email || '',
+        }),
+      });
+      if (srvRes.status === 403 || srvRes.status === 409) {
+        const errData = await srvRes.json().catch(() => null);
+        throw new Error(errData?.error || 'Registrasi ditolak oleh server.');
+      }
+    } catch (srvErr: any) {
+      if (srvErr?.message && (srvErr.message.includes('Otoritas ditolak') || srvErr.message.includes('sudah terdaftar'))) {
+        throw srvErr;
+      }
+      // On static deployment without /api/users, proceed with localStorage + Webhook
+    }
+
     // Save to local registered list
-    setRegisteredUsers(prev => [...prev, newUser]);
-    setCurrentUser(newUser);
+    setRegisteredUsers(prev => mergeUsersByEmail(prev, [newUser]));
+    // Keep Admin logged in when Admin registers another user; log public user straight into their new account
+    if (!callerIsAdmin || !currentUser) {
+      setCurrentUser(newUser);
+    }
 
     // Sync to Google Sheet tab "master Login" via Webhook or OAuth
     let sheetsSyncSuccess = false;
@@ -296,11 +382,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.warn('Auto-sync user notice:', e);
     }
 
-    // Always run backend sync fallback as well
-    try {
-      await syncUserRegistrationToGoogleSheets(newUser);
-    } catch (err) {
-      console.warn('Backend sync warning:', err);
+    // Run backend Service Account fallback only if needed & configured
+    if (!sheetsSyncSuccess && hasServerSyncCapability()) {
+      try {
+        await syncUserRegistrationToGoogleSheets(newUser);
+        sheetsSyncSuccess = true;
+      } catch (err) {
+        console.warn('Backend sync warning:', err);
+      }
     }
 
     const syncStatusMsg = sheetsSyncSuccess
@@ -312,6 +401,58 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       message: `Akun ${newUser.name} (${newUser.email}) berhasil terdaftar${syncStatusMsg}`,
       user: newUser,
     };
+  };
+
+  const updateUserRole = async (userId: string, newRole: UserRole, newTitle?: string): Promise<User> => {
+    if (!isAdminUser(currentUser, googleUser)) {
+      throw new Error(
+        'Otoritas ditolak: Hanya Admin (clx.hartono17@gmail.com) yang dapat menetapkan atau mengubah role CEO, COO, dan CFO.'
+      );
+    }
+
+    const target = registeredUsers.find(u => u.id === userId);
+    if (!target) {
+      throw new Error('Pengguna tidak ditemukan.');
+    }
+
+    const updatedTitle = (newTitle || '').trim() || `${newRole} (${target.division || 'General'})`;
+    const updatedUser: User = {
+      ...target,
+      role: newRole,
+      title: updatedTitle,
+    };
+
+    try {
+      const srvRes = await fetch(`/api/users/${encodeURIComponent(userId)}/role`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          role: newRole,
+          title: updatedTitle,
+          requesterEmail: currentUser?.email || googleUser?.email || '',
+          userFallback: target,
+        }),
+      });
+      if (srvRes.status === 403 || srvRes.status === 400) {
+        const errData = await srvRes.json().catch(() => null);
+        throw new Error(errData?.error || 'Gagal memperbarui role pengguna.');
+      }
+    } catch (err: any) {
+      if (err?.message?.includes('Otoritas ditolak') || err?.message?.includes('tidak valid')) {
+        throw err;
+      }
+    }
+
+    setRegisteredUsers(prev => prev.map(u => (u.id === userId ? updatedUser : u)));
+    if (currentUser?.id === userId) {
+      setCurrentUser(updatedUser);
+    }
+
+    autoSyncUserToGoogleSheet(updatedUser).catch(err => {
+      console.warn('Background user role sync notice:', err);
+    });
+
+    return updatedUser;
   };
 
   const loginUser = (email: string, password?: string): { success: boolean; message: string } => {
@@ -363,6 +504,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         registeredUsers,
         isLoggedIn,
         registerUser,
+        updateUserRole,
+        refreshRegisteredUsers,
         loginUser,
         logout,
         switchRegisteredUser,
