@@ -354,6 +354,8 @@ export const FormEditModal: React.FC<FormEditModalProps> = ({
                           type="number"
                           aria-label={`Harga satuan item ${idx + 1}`}
                           min="0"
+                          step="any"
+                          placeholder="0"
                           value={item.unitPrice}
                           onChange={e => handleItemChange(idx, 'unitPrice', e.target.value)}
                           className="w-full px-2 py-1 bg-slate-50 border border-slate-200 rounded font-mono font-bold text-slate-800 text-right"

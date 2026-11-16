@@ -111,8 +111,8 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
       const next = [...prev];
       const target = { ...next[index], [field]: val };
       if (field === 'qty' || field === 'unitPrice') {
-        const q = field === 'qty' ? parseFloat(val) || 0 : target.qty;
-        const p = field === 'unitPrice' ? parseFloat(val) || 0 : target.unitPrice;
+        const q = field === 'qty' ? parseFloat(val) || 0 : parseFloat(String(target.qty)) || 0;
+        const p = field === 'unitPrice' ? parseFloat(val) || 0 : parseFloat(String(target.unitPrice)) || 0;
         target.total = q * p;
       }
       next[index] = target;
@@ -186,7 +186,16 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
     bankName,
     bankAccountNo,
     bankAccountName,
-    items,
+    items: items.map(it => {
+      const qtyNum = Number(it.qty) || 0;
+      const priceNum = Number(it.unitPrice) || 0;
+      return {
+        ...it,
+        qty: qtyNum,
+        unitPrice: priceNum,
+        total: qtyNum * priceNum,
+      };
+    }),
     totalAmount,
     terbilang: liveTerbilang,
     status: 'Pending Approval',
@@ -590,8 +599,10 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
                       <td className="py-2 px-3">
                         <input
                           type="number"
+                          aria-label={`Harga Satuan item ${idx + 1}`}
                           min="0"
-                          step="1000"
+                          step="any"
+                          placeholder="0"
                           value={item.unitPrice}
                           onChange={e => handleItemChange(idx, 'unitPrice', e.target.value)}
                           className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs text-right font-mono text-slate-800"
