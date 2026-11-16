@@ -211,6 +211,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const res = await signInWithGoogle();
       setGoogleUser(res.user);
       setGoogleToken(res.accessToken);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('clx-google-connected'));
+      }
       return res.accessToken;
     } catch (err: any) {
       console.error('Google Connect Error:', err);

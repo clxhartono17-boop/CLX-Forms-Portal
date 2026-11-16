@@ -2,6 +2,73 @@ import { FormDocument, FormType, ApprovalStatus, UserRole, Division } from '../t
 import { requiresCeoApproval } from './approvalRules.ts';
 
 /**
+ * Safely parses numeric or currency strings from Google Sheets (e.g. 1500000, "Rp 1.500.000", "23,450").
+ */
+export function parseSheetAmount(raw: unknown): number {
+  if (typeof raw === 'number') {
+    return Number.isFinite(raw) ? raw : 0;
+  }
+  if (typeof raw !== 'string') return 0;
+  const trimmed = raw.trim();
+  if (!trimmed) return 0;
+
+  // Remove currency symbol/spaces
+  const cleaned = trimmed.replace(/rp\.?/gi, '').replace(/\s+/g, '');
+
+  // Detect Indonesian thousands separators like "1.500.000" or "23.450"
+  if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(cleaned)) {
+    const normalized = cleaned.replace(/\./g, '').replace(',', '.');
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  // Standard comma thousands separators like "1,500,000"
+  if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(cleaned)) {
+    const normalized = cleaned.replace(/,/g, '');
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  // Generic numeric fallback
+  const fallback = Number(cleaned.replace(/[^0-9.-]/g, ''));
+  return Number.isFinite(fallback) ? fallback : 0;
+}
+
+/**
+ * Strips heavy Base64 blobs (signature images & attachment dataUrls) before sending
+ * a FormDocument to Google Apps Script Webhook so payloads stay small and never stall.
+ */
+export function sanitizeFormForWebhook(doc: FormDocument): FormDocument {
+  const safeSignatures: FormDocument['signatures'] = {};
+  if (doc.signatures) {
+    (['maker', 'cso', 'coo', 'cfo', 'ceo'] as const).forEach(key => {
+      const stamp = doc.signatures[key];
+      if (stamp) {
+        const { signatureImage: _img, ...restStamp } = stamp;
+        safeSignatures[key] = restStamp;
+      }
+    });
+  }
+
+  const safeAttachments = (doc.attachments || []).map(att => ({
+    id: att.id,
+    name: att.name,
+    size: att.size,
+    type: att.type,
+    dataUrl: '',
+    uploadedAt: att.uploadedAt,
+  }));
+
+  return {
+    ...doc,
+    totalAmount: Number(doc.totalAmount) || 0,
+    sequenceNumber: Number(doc.sequenceNumber) || 1,
+    signatures: safeSignatures,
+    attachments: safeAttachments,
+  };
+}
+
+/**
  * Parses a combined bank string like "BCA - 8830192831 (a.n Hartono)" into separate fields.
  */
 export function parseBankString(rawBank?: string): {
@@ -53,6 +120,79 @@ export function resolveAssigneeFromStatus(
 }
 
 /**
+ * Parses 19-column rows (Columns B..T starting at Row 9) fetched directly from Google Sheets API
+ * into partial FormDocument objects for mirroring.
+ */
+export function parseSheetRowsToForms(
+  rows: any[][],
+  sheetName = 'Rekapan Form',
+  startRowNumber = 9
+): Partial<FormDocument>[] {
+  if (!Array.isArray(rows)) return [];
+  const results: Partial<FormDocument>[] = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i] || [];
+    const docNumber = String(row[2] || '').trim();
+    if (!docNumber || docNumber === '-' || docNumber.toLowerCase() === 'no. formulir') {
+      continue;
+    }
+
+    const seq = parseSheetAmount(row[0]) || i + 1;
+    const rawType = String(row[1] || 'FPP').trim();
+    const formType = (rawType === 'PFB' ? 'FPP' : rawType) as FormType;
+    const date = String(row[3] || '').trim();
+    const targetDate = String(row[4] || date).trim();
+    const division = (String(row[5] || 'Finance').trim() || 'Finance') as Division;
+    const requesterName = String(row[6] || '').trim();
+    const purpose = String(row[7] || '').trim();
+    const dpp = parseSheetAmount(row[8]);
+    const totalAmount = parseSheetAmount(row[10]) || dpp;
+    const paymentMethod = (String(row[11] || 'Bank Transfer').trim() || 'Bank Transfer') as
+      | 'Bank Transfer'
+      | 'Cash'
+      | 'Giro / Cheque';
+    const bankName = String(row[12] || '').trim();
+    const settlementDate = String(row[13] || '-').trim();
+    const status = (String(row[15] || 'Pending Approval').trim() || 'Pending Approval') as ApprovalStatus;
+    const notes = String(row[17] || '').trim();
+    const link = String(row[18] || '').trim();
+    const actualRow = startRowNumber + i;
+
+    results.push({
+      id: `sheet-row-${actualRow}-${docNumber.replace(/[^a-zA-Z0-9]/g, '_')}`,
+      sequenceNumber: seq,
+      formType,
+      docNumber,
+      date,
+      targetDate,
+      division,
+      requesterName,
+      purpose,
+      totalAmount,
+      paymentMethod,
+      bankName,
+      settlementDate,
+      notes,
+      status,
+      currentAssigneeRole: resolveAssigneeFromStatus(status, totalAmount),
+      googleSheets: {
+        synced: true,
+        rowNumber: actualRow,
+        sheetName,
+      },
+      googleDrive: {
+        uploaded: link.includes('http'),
+        folderPath: link.includes('http') ? '' : link,
+        fileUrl: link.includes('http') ? link : undefined,
+      },
+    });
+  }
+
+  return results;
+}
+
+/**
  * Mirrors Google Sheet rows into the portal's FormDocument list:
  * - Any row deleted from the Google Sheet is immediately excluded from the returned list.
  * - Any row updated in the Google Sheet updates the corresponding portal record.
@@ -77,7 +217,11 @@ export function mirrorSheetFormsWithLocal(
 
       const rawFormType = (sf.formType as string) === 'PFB' ? 'FPP' : (sf.formType || existingLocal?.formType || 'FPP');
       const formType = rawFormType as FormType;
-      const totalAmount = Number(sf.totalAmount ?? existingLocal?.totalAmount ?? 0);
+      const parsedSheetTotal = parseSheetAmount(sf.totalAmount);
+      const totalAmount =
+        sf.totalAmount !== undefined && sf.totalAmount !== null
+          ? parsedSheetTotal
+          : Number(existingLocal?.totalAmount ?? 0);
 
       const status = (sf.status || existingLocal?.status || 'Pending Approval') as ApprovalStatus;
       const currentAssigneeRole = resolveAssigneeFromStatus(status, totalAmount);
@@ -140,8 +284,34 @@ export function mirrorSheetFormsWithLocal(
         rejectionReason: existingLocal?.rejectionReason || sf.rejectionReason,
         createdAt: existingLocal?.createdAt || sf.createdAt || new Date().toISOString(),
         updatedAt: sf.updatedAt || existingLocal?.updatedAt || new Date().toISOString(),
-        googleSheets: sf.googleSheets || existingLocal?.googleSheets || { synced: true, sheetName: 'Rekap Form CLX' },
+        googleSheets: sf.googleSheets || existingLocal?.googleSheets || { synced: true, sheetName: 'Rekapan Form' },
         googleDrive: sf.googleDrive || existingLocal?.googleDrive || { uploaded: false, folderPath: '' },
       };
     });
+}
+
+/**
+ * Mirrors Google Sheet rows while preserving newly submitted local forms that are still
+ * inside their brief Google Sheet propagation grace window.
+ */
+export function reconcileFormsWithPendingCreations(
+  sheetForms: Partial<FormDocument>[],
+  localForms: FormDocument[],
+  pendingDocNumbers: Set<string>
+): FormDocument[] {
+  const mirrored = mirrorSheetFormsWithLocal(sheetForms, localForms);
+  if (!pendingDocNumbers || pendingDocNumbers.size === 0) {
+    return mirrored;
+  }
+
+  const sheetDocSet = new Set(
+    mirrored.map(d => (d.docNumber || '').trim().toLowerCase()).filter(Boolean)
+  );
+
+  const pendingToPreserve = localForms.filter(localDoc => {
+    const key = (localDoc.docNumber || '').trim().toLowerCase();
+    return key && pendingDocNumbers.has(key) && !sheetDocSet.has(key);
+  });
+
+  return [...pendingToPreserve, ...mirrored];
 }

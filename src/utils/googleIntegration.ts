@@ -3,7 +3,8 @@
  * Compatible with Next.js App Router (Vercel Serverless Functions) & Client SDK.
  */
 
-import { FormDocument, FormType, User } from '../types/index.ts'; // Pastikan path ini benar
+import { FormDocument, FormType, User } from '../types/index.ts';
+import { sanitizeFormForWebhook } from './sheetSyncMirror.ts';
 
 export const GOOGLE_DRIVE_PARENT_FOLDER_ID = '1hgUyTqNsfJsC30pY7O2kPS95DqEEySm9';
 export const GOOGLE_SHEETS_TEMPLATE_ID = '1irb4RR0LMMBqRfGP4gxvX82c0nLfWIXKHzQ_tqC3h8c';
@@ -121,14 +122,16 @@ export async function syncToGoogleSheets(
     new Date().toISOString(),
   ];
 
+  const safeDoc = sanitizeFormForWebhook(doc);
+
   const res = await fetch(`${API_BASE_URL}/sheets-sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    // Kita kirim formData sebagai objek utuh, dan juga rowData agar backend bisa memilih menggunakannya
+    signal: AbortSignal.timeout(10000),
     body: JSON.stringify({ 
       spreadsheetId: GOOGLE_SHEETS_TEMPLATE_ID, 
       sheetName, 
-      formData: doc, 
+      formData: safeDoc, 
       row: rowData 
     }),
   });

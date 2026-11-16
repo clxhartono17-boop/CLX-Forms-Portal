@@ -2,8 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parseBankString,
+  parseSheetAmount,
+  parseSheetRowsToForms,
   resolveAssigneeFromStatus,
   mirrorSheetFormsWithLocal,
+  reconcileFormsWithPendingCreations,
+  sanitizeFormForWebhook,
 } from './sheetSyncMirror.ts';
 import { FormDocument } from '../types/index.ts';
 
@@ -43,6 +47,80 @@ const makeLocalForm = (overrides: Partial<FormDocument> = {}): FormDocument => (
   createdAt: '2026-11-02T00:00:00.000Z',
   updatedAt: '2026-11-02T00:00:00.000Z',
   ...overrides,
+});
+
+test('parseSheetAmount parses numbers, Indonesian currency strings, and decimals accurately', () => {
+  assert.equal(parseSheetAmount(1500000), 1500000);
+  assert.equal(parseSheetAmount('Rp 1.500.000'), 1500000);
+  assert.equal(parseSheetAmount('23.450'), 23450);
+  assert.equal(parseSheetAmount('12345'), 12345);
+  assert.equal(parseSheetAmount(''), 0);
+});
+
+test('sanitizeFormForWebhook strips heavy Base64 payloads while preserving metadata', () => {
+  const heavy = makeLocalForm({
+    signatures: {
+      maker: {
+        role: 'Staff',
+        userName: 'Budi',
+        userTitle: 'Staff Finance',
+        signedAt: '2026-11-16T00:00:00Z',
+        signatureImage: 'data:image/png;base64,' + 'X'.repeat(5000),
+        digitalHash: 'HASH-123',
+      },
+    },
+    attachments: [
+      {
+        id: 'att-1',
+        name: 'invoice.pdf',
+        size: 102400,
+        type: 'application/pdf',
+        dataUrl: 'data:application/pdf;base64,' + 'Y'.repeat(5000),
+        uploadedAt: '2026-11-16T00:00:00Z',
+      },
+    ],
+  });
+
+  const clean = sanitizeFormForWebhook(heavy);
+  assert.equal(clean.signatures.maker?.userName, 'Budi');
+  assert.equal(clean.signatures.maker?.signatureImage, undefined);
+  assert.equal(clean.attachments.length, 1);
+  assert.equal(clean.attachments[0].name, 'invoice.pdf');
+  assert.equal(clean.attachments[0].dataUrl, '');
+});
+
+test('parseSheetRowsToForms converts 19-column sheet rows into FormDocument partials', () => {
+  const rows = [
+    [
+      '1',
+      'FPU',
+      'FPU-0001/CLX/16/XI/MMXXVI',
+      '2026-11-16',
+      '2026-11-16',
+      'Operation',
+      'Sari Staff',
+      'Biaya Operasional Gudang',
+      'Rp 250.500',
+      '0',
+      'Rp 250.500',
+      'Bank Transfer',
+      'BCA - 112233 (a.n Sari)',
+      'H+7 Setelah Realisasi',
+      'Maker -> CSO -> COO -> CFO (Selesai di CFO)',
+      'Pending Approval',
+      'Pengajuan Kas Bon',
+      'Urgent',
+      '-',
+    ],
+  ];
+
+  const parsed = parseSheetRowsToForms(rows, 'Rekapan Form', 9);
+  assert.equal(parsed.length, 1);
+  assert.equal(parsed[0].docNumber, 'FPU-0001/CLX/16/XI/MMXXVI');
+  assert.equal(parsed[0].totalAmount, 250500);
+  assert.equal(parsed[0].division, 'Operation');
+  assert.equal(parsed[0].currentAssigneeRole, 'CSO');
+  assert.equal(parsed[0].googleSheets?.rowNumber, 9);
 });
 
 test('parseBankString parses combined bank string cleanly', () => {
@@ -120,4 +198,23 @@ test('mirrorSheetFormsWithLocal merges updated sheet values and preserves local 
   assert.equal(mirrored[0].bankAccountName, 'PT CLX');
   assert.equal(mirrored[0].items.length, 1);
   assert.equal(mirrored[0].items[0].description, 'Helm Safety');
+});
+
+test('reconcileFormsWithPendingCreations keeps newly created local doc during sheet propagation grace period', () => {
+  const existingLocal = makeLocalForm({ docNumber: 'FPPB-0001/CLX/02/XI/MMXXVI' });
+  const newlySaved = makeLocalForm({ id: 'new-2', docNumber: 'FPU-0009/CLX/16/XI/MMXXVI' });
+
+  const sheetForms = [
+    {
+      docNumber: 'FPPB-0001/CLX/02/XI/MMXXVI',
+      formType: 'FPPB' as const,
+      totalAmount: 850000,
+    },
+  ];
+
+  const pending = new Set<string>(['fpu-0009/clx/16/xi/mmxxvi']);
+  const merged = reconcileFormsWithPendingCreations(sheetForms, [newlySaved, existingLocal], pending);
+  assert.equal(merged.length, 2);
+  assert.equal(merged[0].docNumber, 'FPU-0009/CLX/16/XI/MMXXVI');
+  assert.equal(merged[1].docNumber, 'FPPB-0001/CLX/02/XI/MMXXVI');
 });

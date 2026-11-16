@@ -461,13 +461,29 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
     e.preventDefault();
     setValidationError(null);
 
+    if (!requesterName.trim()) {
+      setValidationError('Harap isi Nama Pemohon (Staff).');
+      return;
+    }
+
+    if (!selectedDate) {
+      setValidationError('Harap pilih Tanggal Pengajuan.');
+      return;
+    }
+
     if (!purpose.trim()) {
       setValidationError('Harap isi Keperluan / Deskripsi Pengajuan.');
       return;
     }
 
+    const hasInvalidQty = items.some(it => Number(it.qty) < 0 || Number.isNaN(Number(it.qty)));
+    if (hasInvalidQty) {
+      setValidationError('Jumlah (Qty) pada rincian item tidak boleh bernilai negatif.');
+      return;
+    }
+
     if (totalAmount <= 0) {
-      setValidationError('Total pengajuan harus lebih dari Rp 0.');
+      setValidationError('Total pengajuan harus lebih dari Rp 0. Harap isi Qty dan Harga Satuan dengan benar.');
       return;
     }
 
@@ -655,7 +671,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
       {showLivePreview ? (
         <PhysicalFormPreview doc={currentDraftDoc} />
       ) : (
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form noValidate onSubmit={handleSubmit} className="space-y-6">
           {/* 1. Form Type Selector */}
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
             <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
@@ -888,7 +904,9 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
                       <td className="py-2 px-3">
                         <input
                           type="number"
-                          min="1"
+                          aria-label={`Qty item ${idx + 1}`}
+                          min="0"
+                          step="any"
                           value={item.qty}
                           onChange={e => handleItemChange(idx, 'qty', e.target.value)}
                           className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs text-center text-slate-800"
@@ -1109,6 +1127,16 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
 
           {/* Action Buttons & Local Draft Feedback */}
           <div className="space-y-2.5 pt-2">
+            {validationError && (
+              <div
+                data-testid="bottom-validation-error"
+                className="flex items-center space-x-2 bg-red-50 border border-red-300 text-red-900 text-xs px-4 py-3 rounded-xl font-medium"
+              >
+                <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                <span>{validationError}</span>
+              </div>
+            )}
+
             {manualDraftFeedback && (
               <div
                 data-testid="manual-draft-feedback-bottom"
@@ -1268,22 +1296,34 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
             </p>
 
             {/* Google Sheets Sync Result Status */}
-            <div className={`mt-5 p-3.5 rounded-xl border text-left text-xs ${
-              successModalDoc.googleSheets?.synced
-                ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                : 'bg-blue-50 border-blue-200 text-blue-900'
-            }`}>
+            <div
+              data-testid="save-sheet-status"
+              className={`mt-5 p-3.5 rounded-xl border text-left text-xs ${
+                successModalDoc.googleSheets?.synced
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                  : 'bg-amber-50 border-amber-200 text-amber-950'
+              }`}
+            >
               <div className="font-bold flex items-center space-x-1.5">
-                <span>{successModalDoc.googleSheets?.synced ? '✅ Tersinkronisasi Otomatis' : 'ℹ️ Tersimpan di Sistem CLX'}</span>
+                <span>
+                  {successModalDoc.googleSheets?.synced
+                    ? `✅ Tersinkronisasi Otomatis ke Google Sheet (${successModalDoc.googleSheets.sheetName || 'Rekapan Form'})`
+                    : '⚠️ Tersimpan di Portal (Belum Masuk ke Google Sheet)'}
+                </span>
               </div>
               <p className="text-[11px] mt-1 leading-relaxed">
                 {successModalDoc.googleSheets?.synced ? (
                   <>
-                    Data pengajuan Anda telah otomatis tercatat dan diteruskan ke alur persetujuan C-Level ({successModalDoc.currentAssigneeRole}).
+                    Data pengajuan Anda telah otomatis tercatat di Spreadsheet <strong>{successModalDoc.googleSheets.sheetName || 'Rekapan Form'}</strong>
+                    {successModalDoc.googleSheets.rowNumber ? ` (baris ${successModalDoc.googleSheets.rowNumber})` : ''} dan diteruskan ke alur persetujuan C-Level ({successModalDoc.currentAssigneeRole}).
                   </>
                 ) : (
                   <>
-                    Formulir berhasil tersimpan di portal CLX dan diteruskan ke {successModalDoc.currentAssigneeRole} untuk peninjauan.
+                    Formulir berhasil tersimpan di portal CLX dan diteruskan ke <strong>{successModalDoc.currentAssigneeRole}</strong>.{' '}
+                    {successModalDoc.googleSheets?.error ||
+                      (isAdmin
+                        ? 'Aktifkan Webhook Google Apps Script melalui tombol Auto-Sync Sheet di bar atas agar data otomatis tertulis ke Google Sheet.'
+                        : 'Admin (clx.hartono17@gmail.com) perlu mengaktifkan Auto-Sync Webhook satu kali agar data terkirim otomatis ke Google Sheet.')}
                   </>
                 )}
               </p>

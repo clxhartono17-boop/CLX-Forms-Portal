@@ -117,6 +117,7 @@ export interface FormDocument {
     rowNumber?: number;
     sheetName: string;
     syncedAt?: string;
+    error?: string;
   };
 
   createdAt: string;

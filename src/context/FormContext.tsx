@@ -1,26 +1,30 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { FormDocument, FormType, UserRole, DigitalStamp } from '../types/index.ts';
 import { INITIAL_FORMS } from '../data/mockData.ts';
 import { syncToGoogleDrive, syncToGoogleSheets } from '../utils/googleIntegration.ts';
 import { generateMergedPdf } from '../utils/pdfGenerator.ts';
-import { getNextApprovalStep, requiresCeoApproval } from '../utils/approvalRules.ts';
-import { mirrorSheetFormsWithLocal } from '../utils/sheetSyncMirror.ts';
-import { 
-  appendFormToGoogleSheets, 
-  getGoogleAccessToken, 
-  autoSyncFormToGoogleSheet, 
+import { getNextApprovalStep } from '../utils/approvalRules.ts';
+import {
+  reconcileFormsWithPendingCreations,
+  sanitizeFormForWebhook,
+} from '../utils/sheetSyncMirror.ts';
+import {
+  getGoogleAccessToken,
+  autoSyncFormToGoogleSheet,
   autoSyncStatusToGoogleSheet,
   fetchFormsFromAppsScriptWebhook,
-  syncFormsToWebhook,
   autoUpdateFormInGoogleSheet,
   autoDeleteFormInGoogleSheet,
-  isAutoSyncConfigured
+  isAutoSyncConfigured,
+  syncWebhookConfigWithServer,
+  hasServerSyncCapability,
 } from '../utils/googleWorkspace.ts';
 
 interface FormContextType {
   forms: FormDocument[];
   isLoadingFromSheet: boolean;
   lastSyncedAt: string | null;
+  syncError: string | null;
   refreshFromGoogleSheet: () => Promise<number>;
   addForm: (doc: FormDocument) => Promise<FormDocument>;
   updateForm: (doc: FormDocument) => void;
@@ -39,6 +43,7 @@ const FormContext = createContext<FormContextType | undefined>(undefined);
 
 // Updated storage key to purge previous dummy records and use purely real data
 const STORAGE_KEY = 'clx_real_forms_v2';
+const PENDING_GRACE_MS = 15000;
 
 export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [forms, setForms] = useState<FormDocument[]>(() => {
@@ -55,74 +60,129 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [isLoadingFromSheet, setIsLoadingFromSheet] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
-  const refreshFromGoogleSheet = async (): Promise<number> => {
-    if (!isAutoSyncConfigured()) return forms.length;
+  // Protects newly created / edited docs during the brief Google Sheet propagation window
+  const pendingDocNumbersRef = useRef<Map<string, number>>(new Map());
+
+  const markPendingDoc = (docNumber?: string) => {
+    const key = (docNumber || '').trim().toLowerCase();
+    if (!key) return;
+    pendingDocNumbersRef.current.set(key, Date.now() + PENDING_GRACE_MS);
+  };
+
+  const getActivePendingSet = (): Set<string> => {
+    const now = Date.now();
+    const active = new Set<string>();
+    for (const [key, expiresAt] of pendingDocNumbersRef.current.entries()) {
+      if (expiresAt > now) {
+        active.add(key);
+      } else {
+        pendingDocNumbersRef.current.delete(key);
+      }
+    }
+    return active;
+  };
+
+  const hasAnySyncChannel = (): boolean => {
+    return isAutoSyncConfigured() || Boolean(getGoogleAccessToken());
+  };
+
+  const refreshFromGoogleSheet = async (force = false): Promise<number> => {
+    if (!force && !hasAnySyncChannel()) return forms.length;
     setIsLoadingFromSheet(true);
     try {
       const res = await fetchFormsFromAppsScriptWebhook();
       if (res.success && Array.isArray(res.forms)) {
-        // EXACT MIRROR: If rows were deleted in backend, res.forms does not contain them!
-        setForms(prevForms => mirrorSheetFormsWithLocal(res.forms, prevForms));
+        const pendingSet = getActivePendingSet();
+        setForms(prevForms => reconcileFormsWithPendingCreations(res.forms, prevForms, pendingSet));
         setLastSyncedAt(new Date().toISOString());
+        setSyncError(null);
         return res.forms.length;
       }
-    } catch (err) {
+      if (res.error) {
+        setSyncError(res.error);
+      }
+    } catch (err: any) {
       console.warn('refreshFromGoogleSheet error:', err);
+      setSyncError(err?.message || 'Gagal membaca data dari Google Sheet');
     } finally {
       setIsLoadingFromSheet(false);
     }
     return forms.length;
   };
 
-  // Auto-sync polling every 5s in background and immediate sync on focus, visibilitychange, or webhook config update
+  // Boot server webhook sync + auto-sync polling every 5s and immediate sync on focus/visibility/OAuth/config update
   useEffect(() => {
     let interval: ReturnType<typeof setInterval> | null = null;
+    let isMounted = true;
 
     const startSyncCycle = () => {
+      if (!isMounted) return;
       if (interval) {
         clearInterval(interval);
         interval = null;
       }
-      if (!isAutoSyncConfigured()) return;
+      if (!hasAnySyncChannel()) return;
 
       // 1. Immediate fetch from sheet "Rekapan Form"
       refreshFromGoogleSheet();
 
-      // 2. Poll every 5 seconds so deleted/edited rows mirror rapidly
+      // 2. Poll every 5 seconds so deleted/edited rows mirror rapidly across all browsers
       interval = setInterval(() => {
         refreshFromGoogleSheet();
       }, 5000);
     };
 
-    startSyncCycle();
+    syncWebhookConfigWithServer().then(configured => {
+      if (!isMounted) return;
+      if (configured || getGoogleAccessToken()) {
+        startSyncCycle();
+      } else {
+        // Probe /api/google/forms once in case Service Account is active on backend
+        refreshFromGoogleSheet(true);
+      }
+    });
 
-    const onFocusOrVisible = () => {
-      if (document.visibilityState === 'visible' && isAutoSyncConfigured()) {
-        refreshFromGoogleSheet();
+    const onFocusOrVisible = async () => {
+      if (document.visibilityState !== 'visible') return;
+      await syncWebhookConfigWithServer();
+      if (hasAnySyncChannel()) {
+        refreshFromGoogleSheet(true);
       }
     };
     const onConfigUpdated = () => {
+      startSyncCycle();
+    };
+    const onGoogleConnected = () => {
       startSyncCycle();
     };
 
     window.addEventListener('focus', onFocusOrVisible);
     document.addEventListener('visibilitychange', onFocusOrVisible);
     window.addEventListener('clx-autosync-updated', onConfigUpdated);
+    window.addEventListener('clx-google-connected', onGoogleConnected);
 
     return () => {
+      isMounted = false;
       if (interval) clearInterval(interval);
       window.removeEventListener('focus', onFocusOrVisible);
       document.removeEventListener('visibilitychange', onFocusOrVisible);
       window.removeEventListener('clx-autosync-updated', onConfigUpdated);
+      window.removeEventListener('clx-google-connected', onGoogleConnected);
     };
   }, []);
 
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(forms));
-    } catch (e) {
-      console.warn('Failed to save forms to localStorage:', e);
+    } catch {
+      // Quota fallback: strip heavy Base64 attachments & signature images so records still persist locally
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(forms.map(sanitizeFormForWebhook)));
+      } catch (err2) {
+        console.warn('Failed to save forms to localStorage:', err2);
+      }
     }
   }, [forms]);
 
@@ -134,20 +194,41 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const addForm = async (newDoc: FormDocument): Promise<FormDocument> => {
-    let updatedDoc = { ...newDoc };
+    let updatedDoc: FormDocument = { ...newDoc };
+    markPendingDoc(updatedDoc.docNumber);
+
+    let sheetsSuccess = false;
+    let targetRowNumber: number | undefined;
+    let targetSheetName = 'Rekapan Form';
+    let syncErrorMsg: string | undefined;
 
     try {
-      // 1. Automatically record to Google Sheet at gid=0 (Webhook / OAuth / Proxy)
-      const autoRes = await autoSyncFormToGoogleSheet(updatedDoc, forms.length + 1);
-      
-      let sheetsSuccess = autoRes.synced;
-      let targetRowNumber = autoRes.rowNumber;
-      let targetSheetName = autoRes.sheetTitle || 'Rekapan Form';
+      // Ensure latest server webhook URL is loaded if a non-admin opened the page
+      if (!isAutoSyncConfigured()) {
+        await syncWebhookConfigWithServer();
+      }
 
-      try {
-        await syncToGoogleSheets(updatedDoc);
-      } catch (err) {
-        console.warn('Backend sheets proxy notice:', err);
+      // 1. Primary path: Webhook or OAuth Google Sheets API (sanitized lightweight payload)
+      const autoRes = await autoSyncFormToGoogleSheet(updatedDoc, forms.length + 1);
+      sheetsSuccess = autoRes.synced;
+      targetRowNumber = autoRes.rowNumber;
+      targetSheetName = autoRes.sheetTitle || 'Rekapan Form';
+      syncErrorMsg = autoRes.error;
+
+      // 2. Only hit backend /api/google/sheets-sync fallback if server has Service Account or Webhook configured
+      if (!sheetsSuccess && hasServerSyncCapability()) {
+        try {
+          const proxyRes = await syncToGoogleSheets(updatedDoc);
+          sheetsSuccess = true;
+          targetRowNumber = proxyRes.rowNumber;
+          targetSheetName = proxyRes.sheetName || targetSheetName;
+          syncErrorMsg = undefined;
+        } catch (proxyErr: any) {
+          console.warn('Backend sheets proxy notice:', proxyErr);
+          if (!syncErrorMsg) {
+            syncErrorMsg = proxyErr?.message || 'Sinkronisasi ke Google Sheet belum aktif.';
+          }
+        }
       }
 
       updatedDoc.googleSheets = {
@@ -155,9 +236,15 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
         rowNumber: targetRowNumber,
         sheetName: targetSheetName,
         syncedAt: sheetsSuccess ? new Date().toISOString() : undefined,
+        error: sheetsSuccess ? undefined : syncErrorMsg,
       };
-    } catch (err) {
+    } catch (err: any) {
       console.warn('Google auto-sync notice on creation:', err);
+      updatedDoc.googleSheets = {
+        synced: false,
+        sheetName: targetSheetName,
+        error: err?.message || 'Gagal menyinkronkan ke Google Sheet.',
+      };
     }
 
     setForms(prev => [updatedDoc, ...prev]);
@@ -165,6 +252,7 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const updateForm = (updatedDoc: FormDocument) => {
+    markPendingDoc(updatedDoc.docNumber);
     setForms(prev => prev.map(f => (f.id === updatedDoc.id ? updatedDoc : f)));
     // Automatically push update to Google Sheet in background
     autoUpdateFormInGoogleSheet(updatedDoc).catch(err => {
@@ -174,6 +262,9 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const deleteForm = (id: string) => {
     const target = forms.find(f => f.id === id);
+    if (target?.docNumber) {
+      pendingDocNumbersRef.current.delete(target.docNumber.trim().toLowerCase());
+    }
     setForms(prev => prev.filter(f => f.id !== id));
     if (target?.docNumber) {
       autoDeleteFormInGoogleSheet(target.docNumber).catch(err => {
@@ -214,7 +305,7 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
     else if (user.role === 'CFO') updatedSignatures.cfo = stamp;
     else if (user.role === 'CEO') updatedSignatures.ceo = stamp;
 
-    let updatedDoc: FormDocument = {
+    const updatedDoc: FormDocument = {
       ...target,
       status: step.nextStatus,
       currentAssigneeRole: step.nextAssigneeRole,
@@ -239,13 +330,15 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
-    // Update state
+    // Update state & push form changes
     updateForm(updatedDoc);
 
-    // Record status update to Google Sheets "Rekap Form CLX"
+    // Record status update to Google Sheets
     try {
-      await autoSyncStatusToGoogleSheet(updatedDoc);
-      await syncToGoogleSheets(updatedDoc);
+      const webhookOk = await autoSyncStatusToGoogleSheet(updatedDoc);
+      if (!webhookOk) {
+        await syncToGoogleSheets(updatedDoc);
+      }
     } catch (err) {
       console.warn('Sheets update notice:', err);
     }
@@ -273,7 +366,10 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
     updateForm(updatedDoc);
 
     try {
-      await syncToGoogleSheets(updatedDoc);
+      const webhookOk = await autoSyncStatusToGoogleSheet(updatedDoc);
+      if (!webhookOk) {
+        await syncToGoogleSheets(updatedDoc);
+      }
     } catch (err) {
       console.warn('Sheets update notice:', err);
     }
@@ -325,6 +421,7 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const resetToDefault = () => {
+    pendingDocNumbersRef.current.clear();
     localStorage.removeItem(STORAGE_KEY);
     setForms(INITIAL_FORMS);
   };
@@ -335,6 +432,7 @@ export const FormProvider: React.FC<{ children: React.ReactNode }> = ({ children
         forms,
         isLoadingFromSheet,
         lastSyncedAt,
+        syncError,
         refreshFromGoogleSheet,
         addForm,
         updateForm,

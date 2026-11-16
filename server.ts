@@ -2,8 +2,10 @@ import express from 'express';
 import cors from 'cors';
 import { google } from 'googleapis';
 import dotenv from 'dotenv';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { parseSheetRowsToForms } from './src/utils/sheetSyncMirror.ts';
 
 dotenv.config();
 
@@ -19,6 +21,94 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Target Google Sheets ID
 const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID || '1irb4RR0LMMBqRfGP4gxvX82c0nLfWIXKHzQ_tqC3h8c';
+const SYNC_CONFIG_PATH = path.resolve(__dirname, '.clx-sync-config.json');
+
+interface ServerSyncConfig {
+  webhookUrl: string;
+  updatedAt?: string;
+}
+
+function readServerSyncConfig(): ServerSyncConfig {
+  const envUrl = (process.env.VITE_APPS_SCRIPT_URL || process.env.APPS_SCRIPT_URL || '').trim();
+  try {
+    if (fs.existsSync(SYNC_CONFIG_PATH)) {
+      const raw = fs.readFileSync(SYNC_CONFIG_PATH, 'utf8');
+      const parsed = JSON.parse(raw) as Partial<ServerSyncConfig>;
+      const fileUrl = (parsed?.webhookUrl || '').trim();
+      return {
+        webhookUrl: fileUrl || envUrl,
+        updatedAt: parsed?.updatedAt,
+      };
+    }
+  } catch (err) {
+    console.warn('[SyncConfig] Failed reading .clx-sync-config.json:', err);
+  }
+  return { webhookUrl: envUrl };
+}
+
+function writeServerSyncConfig(webhookUrl: string): ServerSyncConfig {
+  const next: ServerSyncConfig = {
+    webhookUrl: webhookUrl.trim(),
+    updatedAt: new Date().toISOString(),
+  };
+  try {
+    if (!next.webhookUrl) {
+      if (fs.existsSync(SYNC_CONFIG_PATH)) fs.unlinkSync(SYNC_CONFIG_PATH);
+    } else {
+      fs.writeFileSync(SYNC_CONFIG_PATH, JSON.stringify(next, null, 2), 'utf8');
+    }
+  } catch (err) {
+    console.warn('[SyncConfig] Failed writing .clx-sync-config.json:', err);
+  }
+  return next;
+}
+
+function getEffectiveWebhookUrl(requestUrl?: string): string {
+  const trimmedReq = (requestUrl || '').trim();
+  if (trimmedReq) return trimmedReq;
+  return readServerSyncConfig().webhookUrl;
+}
+
+async function forwardToAppsScriptWebhook(targetUrl: string, payload: any) {
+  let response: Response;
+  if (payload?.action === 'get_forms' || payload?.action === 'read_forms') {
+    const sep = targetUrl.includes('?') ? '&' : '?';
+    response = await fetch(`${targetUrl}${sep}action=get_forms&_t=${Date.now()}`, {
+      method: 'GET',
+      redirect: 'follow',
+      signal: AbortSignal.timeout(12000),
+    });
+  } else {
+    response = await fetch(targetUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+      redirect: 'follow',
+      signal: AbortSignal.timeout(12000),
+    });
+  }
+
+  const responseText = await response.text();
+  let data: any;
+  try {
+    data = JSON.parse(responseText);
+  } catch {
+    const looksLikeHtml =
+      responseText.trim().startsWith('<') || responseText.toLowerCase().includes('<html');
+    if (looksLikeHtml) {
+      throw new Error(
+        'Google Apps Script mengembalikan halaman HTML (bukan JSON). Pastikan Deployment Web App diatur ke "Who has access: Anyone / Siapa saja" dan deploy Versi Baru.'
+      );
+    }
+    data = { raw: responseText };
+  }
+
+  if (data?.status === 'error') {
+    throw new Error(data.message || 'Apps Script mengembalikan status error');
+  }
+
+  return data;
+}
 
 // Google Service Account Authentication Helper
 const getGoogleAuth = () => {
@@ -34,59 +124,131 @@ const getGoogleAuth = () => {
     key: privateKey,
     scopes: [
       'https://www.googleapis.com/auth/spreadsheets',
-      'https://www.googleapis.com/auth/drive.file'
-    ]
+      'https://www.googleapis.com/auth/drive.file',
+    ],
   });
 };
 
 const sheets = google.sheets('v4');
 
+// 0. GET / POST: Shared Apps Script Webhook Configuration across all users & browsers
+app.get('/api/google/sync-config', (_req, res) => {
+  const cfg = readServerSyncConfig();
+  return res.json({
+    success: true,
+    configured: Boolean(cfg.webhookUrl),
+    webhookUrl: cfg.webhookUrl,
+    serviceAccountConfigured: Boolean(getGoogleAuth()),
+    updatedAt: cfg.updatedAt,
+  });
+});
+
+app.post('/api/google/sync-config', (req, res) => {
+  const webhookUrl = String(req.body?.webhookUrl || '').trim();
+  if (
+    webhookUrl &&
+    (!webhookUrl.startsWith('https://script.google.com/macros/s/') || !webhookUrl.endsWith('/exec'))
+  ) {
+    return res.status(400).json({
+      success: false,
+      error: 'URL Webhook harus diawali https://script.google.com/macros/s/ dan berakhiran /exec',
+    });
+  }
+
+  const saved = writeServerSyncConfig(webhookUrl);
+  return res.json({
+    success: true,
+    configured: Boolean(saved.webhookUrl),
+    webhookUrl: saved.webhookUrl,
+    updatedAt: saved.updatedAt,
+  });
+});
+
 // 1. GET: Ambil Data Form dari Google Sheets (Read)
 app.get('/api/google/forms', async (_req, res) => {
   try {
     const auth = getGoogleAuth();
-    if (!auth) {
-      console.log('[API] Service account not configured in .env, returning empty forms array');
-      return res.json({ success: true, data: [] });
+    if (auth) {
+      const response = await sheets.spreadsheets.values.get({
+        auth,
+        spreadsheetId: SPREADSHEET_ID,
+        range: 'Rekapan Form!B9:T1000',
+      });
+      const rawRows = response.data.values || [];
+      const forms = parseSheetRowsToForms(rawRows, 'Rekapan Form', 9);
+      return res.json({ success: true, data: rawRows, forms, source: 'service_account' });
     }
 
-    const response = await sheets.spreadsheets.values.get({
-      auth,
-      spreadsheetId: SPREADSHEET_ID,
-      range: 'Rekapan Form!A2:Z',
-    });
+    const webhookUrl = getEffectiveWebhookUrl();
+    if (webhookUrl) {
+      const data = await forwardToAppsScriptWebhook(webhookUrl, { action: 'get_forms' });
+      const forms = Array.isArray(data?.forms) ? data.forms : [];
+      return res.json({ success: true, forms, data: forms, source: 'webhook' });
+    }
 
-    return res.json({ success: true, data: response.data.values || [] });
+    return res.json({
+      success: false,
+      configured: false,
+      forms: [],
+      data: [],
+      error: 'Auto-Sync Webhook Google Sheets belum dikonfigurasi oleh Admin.',
+    });
   } catch (error: any) {
     console.error('Error fetching forms from sheets:', error.message || error);
-    // Return gracefully so UI keeps working
-    return res.json({ success: true, data: [], warning: error.message });
+    return res.status(502).json({
+      success: false,
+      forms: [],
+      data: [],
+      error: error.message || 'Gagal membaca data dari Google Sheet.',
+    });
   }
 });
 
 // 2. POST: Simpan Form Baru ke Google Sheets (Write)
 app.post('/api/google/sheets-sync', async (req, res) => {
   try {
-    const { row, sheetName = 'Rekapan Form' } = req.body;
+    const { row, formData, sheetName = 'Rekapan Form' } = req.body;
     const auth = getGoogleAuth();
 
-    if (!auth) {
-      console.log('[API] Service account not configured in .env, simulated sheets-sync accepted');
-      return res.json({ success: true, updatedRange: `${sheetName}!A2:V2` });
+    if (auth) {
+      const response = await sheets.spreadsheets.values.append({
+        auth,
+        spreadsheetId: SPREADSHEET_ID,
+        range: `'${sheetName}'!B9:T9`,
+        valueInputOption: 'USER_ENTERED',
+        insertDataOption: 'INSERT_ROWS',
+        requestBody: { values: [row] },
+      });
+
+      return res.json({ success: true, updatedRange: response.data.updates?.updatedRange });
     }
 
-    const response = await sheets.spreadsheets.values.append({
-      auth,
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${sheetName}!A:A`,
-      valueInputOption: 'USER_ENTERED',
-      requestBody: { values: [row] },
-    });
+    const webhookUrl = getEffectiveWebhookUrl();
+    if (webhookUrl) {
+      const data = await forwardToAppsScriptWebhook(webhookUrl, {
+        action: 'append_form',
+        form: formData,
+        row,
+      });
+      return res.json({
+        success: true,
+        rowNumber: data?.rowNumber,
+        sheetTitle: data?.sheetTitle || sheetName,
+        data,
+      });
+    }
 
-    return res.json({ success: true, updatedRange: response.data.updates?.updatedRange });
+    return res.status(400).json({
+      success: false,
+      configured: false,
+      error: 'Sinkronisasi Google Sheet belum aktif (URL Webhook Apps Script belum disetel oleh Admin).',
+    });
   } catch (error: any) {
     console.error('Error appending form to sheets:', error.message || error);
-    return res.json({ success: true, warning: error.message, simulated: true });
+    return res.status(502).json({
+      success: false,
+      error: error.message || 'Gagal mengirim data ke Google Sheets.',
+    });
   }
 });
 
@@ -94,43 +256,20 @@ app.post('/api/google/sheets-sync', async (req, res) => {
 app.post('/api/google/webhook-sync', async (req, res) => {
   try {
     const { url, payload } = req.body;
-    const targetUrl = url || process.env.VITE_APPS_SCRIPT_URL;
+    const targetUrl = getEffectiveWebhookUrl(url);
     if (!targetUrl) {
-      return res.status(400).json({ success: false, error: 'Target Apps Script Webhook URL is required' });
-    }
-
-    let response: Response;
-    if (payload?.action === 'get_forms' || payload?.action === 'read_forms') {
-      const sep = targetUrl.includes('?') ? '&' : '?';
-      response = await fetch(`${targetUrl}${sep}action=get_forms&_t=${Date.now()}`, {
-        method: 'GET',
-        redirect: 'follow',
-      });
-    } else {
-      response = await fetch(targetUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(payload),
-        redirect: 'follow',
+      return res.status(400).json({
+        success: false,
+        configured: false,
+        error: 'Target Apps Script Webhook URL belum disetel.',
       });
     }
 
-    const responseText = await response.text();
-    let data: any;
-    try {
-      data = JSON.parse(responseText);
-    } catch {
-      data = { raw: responseText };
-    }
-
-    if (data?.status === 'error') {
-      return res.status(502).json({ success: false, error: data.message || 'Apps Script error', data });
-    }
-
+    const data = await forwardToAppsScriptWebhook(targetUrl, payload);
     return res.json({ success: true, data });
   } catch (err: any) {
     console.error('Error in webhook-sync proxy:', err.message || err);
-    return res.status(500).json({ success: false, error: err.message });
+    return res.status(502).json({ success: false, error: err.message });
   }
 });
 
@@ -139,7 +278,6 @@ app.get('/api/google/users', async (_req, res) => {
   try {
     const auth = getGoogleAuth();
     if (!auth) {
-      console.log('[API] Service account not configured, returning empty users');
       return res.json({ success: true, data: [] });
     }
 
@@ -162,33 +300,36 @@ app.post('/api/google/register-user', async (req, res) => {
     const { row, user, sheetName = 'master Login' } = req.body;
     const auth = getGoogleAuth();
 
-    if (!auth) {
-      const targetUrl = process.env.VITE_APPS_SCRIPT_URL;
-      if (targetUrl) {
-        await fetch(targetUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'register_user', user, row }),
-          redirect: 'follow',
-        });
-        return res.json({ success: true, via: 'apps_script_env' });
-      }
-      console.log('[API] Service account not configured in .env, simulated register-user accepted');
+    if (auth) {
+      await sheets.spreadsheets.values.append({
+        auth,
+        spreadsheetId: SPREADSHEET_ID,
+        range: `'${sheetName}'!A:A`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: [row] },
+      });
+
       return res.json({ success: true });
     }
 
-    await sheets.spreadsheets.values.append({
-      auth,
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${sheetName}!A:A`,
-      valueInputOption: 'USER_ENTERED',
-      requestBody: { values: [row] },
-    });
+    const targetUrl = getEffectiveWebhookUrl();
+    if (targetUrl) {
+      await forwardToAppsScriptWebhook(targetUrl, {
+        action: 'register_user',
+        user,
+        row,
+      });
+      return res.json({ success: true, via: 'apps_script_server' });
+    }
 
-    return res.json({ success: true });
+    return res.json({
+      success: false,
+      configured: false,
+      warning: 'Webhook Apps Script belum disetel',
+    });
   } catch (error: any) {
     console.error('Error registering user to sheets:', error.message || error);
-    return res.json({ success: true, warning: error.message, simulated: true });
+    return res.status(502).json({ success: false, error: error.message });
   }
 });
 
@@ -200,7 +341,6 @@ app.post('/api/google/drive-upload', async (req, res) => {
     const resolvedPath = folderPath || `${doc?.formType || 'FPU'} / ${doc?.docNumber || 'FORM'}`;
     const resolvedFileName = fileName || `${doc?.docNumber || 'DOC'}_merged.pdf`;
 
-    // Return structured drive link
     const webViewLink = `https://drive.google.com/drive/folders/${resolvedFolderId}`;
     return res.json({
       success: true,

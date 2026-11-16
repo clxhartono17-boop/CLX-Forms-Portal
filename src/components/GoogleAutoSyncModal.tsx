@@ -18,7 +18,7 @@ import {
   SPREADSHEET_URL, 
   APPS_SCRIPT_SAMPLE_CODE, 
   getAppsScriptUrl, 
-  setAppsScriptUrl, 
+  saveAppsScriptUrlGlobally,
   isAutoSyncConfigured,
   sendToAppsScriptWebhook,
   syncFormsToWebhook,
@@ -135,8 +135,8 @@ export const GoogleAutoSyncModal: React.FC<GoogleAutoSyncModalProps> = ({
     setIsTesting(true);
     setTestResult(null);
 
-    // Save URL to persistent storage
-    setAppsScriptUrl(cleanUrl);
+    // Save URL locally AND persist globally on server for all employees/browsers
+    await saveAppsScriptUrlGlobally(cleanUrl);
 
     try {
       // Send test ping payload
@@ -149,7 +149,7 @@ export const GoogleAutoSyncModal: React.FC<GoogleAutoSyncModalProps> = ({
       if (res.success) {
         setTestResult({
           success: true,
-          message: '🎉 Berhasil! Webhook aktif dan terhubung langsung ke spreadsheet Rekap Form CLX. Mulai sekarang semua form dari Vercel otomatis tersinkronisasi!',
+          message: '🎉 Berhasil! Webhook aktif dan tersimpan global untuk seluruh user. Semua form dari portal otomatis tersinkronisasi 2 arah dengan spreadsheet Rekap Form CLX!',
         });
         if (onSuccess) onSuccess();
       } else {
@@ -168,8 +168,8 @@ export const GoogleAutoSyncModal: React.FC<GoogleAutoSyncModalProps> = ({
     }
   };
 
-  const handleRemove = () => {
-    setAppsScriptUrl('');
+  const handleRemove = async () => {
+    await saveAppsScriptUrlGlobally('');
     setUrlInput('');
     setTestResult({
       success: true,

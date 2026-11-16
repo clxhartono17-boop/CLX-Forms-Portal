@@ -9,6 +9,7 @@ import {
 } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { FormDocument, User } from '../types/index.ts';
+import { parseSheetRowsToForms, sanitizeFormForWebhook } from './sheetSyncMirror.ts';
 
 // Initialize Firebase App
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
@@ -412,6 +413,31 @@ export async function appendFormToGoogleSheets(
   } catch (error: any) {
     console.error('appendFormToGoogleSheets error:', error);
     return { success: false, rowNumber: 0, sheetTitle: '', error: error?.message || 'Network error' };
+  }
+}
+
+/**
+ * Read forms directly from user's Google Sheet via OAuth token (2-way sync fallback)
+ */
+export async function fetchFormsFromGoogleSheetsOAuth(
+  token: string
+): Promise<{ success: boolean; forms: Partial<FormDocument>[]; sheetTitle?: string; error?: string }> {
+  try {
+    const targetTab = await getTargetFormsTabTitle(token);
+    const getRes = await fetchWithTimeout(
+      `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/'${encodeURIComponent(targetTab)}'!B9:T1000`,
+      { headers: { Authorization: `Bearer ${token}` } },
+      10000
+    );
+    if (!getRes.ok) {
+      return { success: false, forms: [], error: `Sheets API HTTP ${getRes.status}` };
+    }
+    const data = await getRes.json();
+    const rows = data.values || [];
+    const forms = parseSheetRowsToForms(rows, targetTab, 9);
+    return { success: true, forms, sheetTitle: targetTab };
+  } catch (error: any) {
+    return { success: false, forms: [], error: error?.message || 'Gagal membaca Google Sheet via OAuth' };
   }
 }
 
@@ -868,26 +894,32 @@ export async function syncAllDataToGoogleSheets(
         }
       }
 
-      // 1. Action: Append Form Baru
+      // 1. Action: Append Form Baru (Idempoten berdasarkan No. Formulir)
       if (data.action === "append_form" || data.form) {
         var row = data.row;
         if (!row && data.form) {
           row = buildFormRowArray(data.form, data.form.sequenceNumber || 1);
         }
 
+        var docNoToWrite = String((data.form && data.form.docNumber) || (row && row[2]) || "").trim();
         var lastR = sheetForms.getLastRow();
         var filledCount = 0;
+        var existingMatchRow = -1;
         if (lastR >= layout.dataStartRow) {
           var colDocVals = sheetForms.getRange(layout.dataStartRow, layout.docNumCol, lastR - layout.dataStartRow + 1, 1).getValues();
           for (var idx = 0; idx < colDocVals.length; idx++) {
-            if (String(colDocVals[idx][0] || "").trim() !== "") {
+            var existingCell = String(colDocVals[idx][0] || "").trim();
+            if (existingCell !== "") {
               filledCount = idx + 1;
+              if (docNoToWrite && existingCell === docNoToWrite) {
+                existingMatchRow = layout.dataStartRow + idx;
+              }
             }
           }
         }
-        var targetRow = layout.dataStartRow + filledCount;
+        var targetRow = existingMatchRow > 0 ? existingMatchRow : (layout.dataStartRow + filledCount);
         if (row && row.length > 0) {
-          row[0] = filledCount + 1;
+          row[0] = existingMatchRow > 0 ? (existingMatchRow - layout.dataStartRow + 1) : (filledCount + 1);
         }
 
         sheetForms.getRange(targetRow, layout.startCol, 1, row.length).setValues([row]);
@@ -1020,6 +1052,19 @@ export async function syncAllDataToGoogleSheets(
     }
   }
 
+  function parseSheetCurrency(raw) {
+    if (typeof raw === "number") return isNaN(raw) ? 0 : raw;
+    var s = String(raw || "").replace(/rp\\.?/gi, "").replace(/\\s+/g, "").trim();
+    if (!s) return 0;
+    if (/^-?\\d{1,3}(\\.\\d{3})+(,\\d+)?$/.test(s)) {
+      return Number(s.replace(/\\./g, "").replace(",", ".")) || 0;
+    }
+    if (/^-?\\d{1,3}(,\\d{3})+(\\.\\d+)?$/.test(s)) {
+      return Number(s.replace(/,/g, "")) || 0;
+    }
+    return Number(s.replace(/[^0-9.-]/g, "")) || 0;
+  }
+
   function getAllFormsJson(ss) {
     var sheetForms = getFormsSheet(ss);
     var layout = getFormsSheetLayout(sheetForms);
@@ -1043,9 +1088,9 @@ export async function syncAllDataToGoogleSheets(
           var div = String(row[5] || "Finance").trim();
           var reqName = String(row[6] || "").trim();
           var purp = String(row[7] || "").trim();
-          var dpp = Number(row[8]) || 0;
-          var tax = Number(row[9]) || 0;
-          var total = Number(row[10]) || dpp;
+          var dpp = parseSheetCurrency(row[8]);
+          var tax = parseSheetCurrency(row[9]);
+          var total = parseSheetCurrency(row[10]) || dpp;
           var payMethod = String(row[11] || "Bank Transfer").trim();
           var bName = String(row[12] || "").trim();
           var settle = String(row[13] || "-").trim();
@@ -1128,18 +1173,40 @@ export async function syncAllDataToGoogleSheets(
     }
   }`;
 
+  let serverWebhookConfigured = false;
+  let serverWebhookUrlCache = '';
+  let serverServiceAccountConfigured = false;
+
+  async function fetchWithTimeout(
+    input: RequestInfo | URL,
+    init: RequestInit = {},
+    timeoutMs = 10000
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(input, { ...init, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   export function getAppsScriptUrl(): string {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem(STORAGE_KEY_APPS_SCRIPT_URL);
       if (stored && stored.trim()) return stored.trim();
     }
+    if (serverWebhookUrlCache) return serverWebhookUrlCache;
     return (import.meta as any).env?.VITE_APPS_SCRIPT_URL || '';
   }
 
   export function setAppsScriptUrl(url: string): void {
+    const trimmed = (url || '').trim();
+    serverWebhookUrlCache = trimmed;
+    serverWebhookConfigured = Boolean(trimmed);
     if (typeof window !== 'undefined') {
-      if (url && url.trim()) {
-        localStorage.setItem(STORAGE_KEY_APPS_SCRIPT_URL, url.trim());
+      if (trimmed) {
+        localStorage.setItem(STORAGE_KEY_APPS_SCRIPT_URL, trimmed);
       } else {
         localStorage.removeItem(STORAGE_KEY_APPS_SCRIPT_URL);
       }
@@ -1147,71 +1214,159 @@ export async function syncAllDataToGoogleSheets(
     }
   }
 
+  /**
+   * Persist the Webhook URL on the Node backend so every employee/device shares
+   * the same Google Sheet connection automatically without manual per-browser setup.
+   */
+  export async function saveAppsScriptUrlGlobally(url: string): Promise<void> {
+    const trimmed = (url || '').trim();
+    setAppsScriptUrl(trimmed);
+    try {
+      await fetchWithTimeout(
+        '/api/google/sync-config',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ webhookUrl: trimmed }),
+        },
+        6000
+      );
+    } catch (err) {
+      console.warn('Could not persist sync config to server (ok on static hosts):', err);
+    }
+  }
+
+  /**
+   * Synchronize Webhook configuration between browser localStorage and server backend on app boot.
+   */
+  export async function syncWebhookConfigWithServer(): Promise<boolean> {
+    const localUrl = getAppsScriptUrl();
+    try {
+      const res = await fetchWithTimeout('/api/google/sync-config', { cache: 'no-store' }, 5000);
+      if (res.ok) {
+        const cfg = await res.json();
+        serverServiceAccountConfigured = Boolean(cfg?.serviceAccountConfigured);
+        const remoteUrl = (cfg?.webhookUrl || '').trim();
+        if (remoteUrl) {
+          serverWebhookConfigured = true;
+          serverWebhookUrlCache = remoteUrl;
+          if (typeof window !== 'undefined' && localStorage.getItem(STORAGE_KEY_APPS_SCRIPT_URL) !== remoteUrl) {
+            localStorage.setItem(STORAGE_KEY_APPS_SCRIPT_URL, remoteUrl);
+            window.dispatchEvent(new CustomEvent('clx-autosync-updated'));
+          }
+          return true;
+        }
+        // If browser already has URL (e.g. Admin saved it earlier) but server didn't, push to server so all users get it
+        if (localUrl) {
+          await saveAppsScriptUrlGlobally(localUrl);
+          return true;
+        }
+        if (serverServiceAccountConfigured) {
+          return true;
+        }
+      }
+    } catch {
+      // Server sync-config endpoint may not exist on static hosting
+    }
+    return Boolean(getAppsScriptUrl() || serverWebhookConfigured || serverServiceAccountConfigured);
+  }
+
   export function isAutoSyncConfigured(): boolean {
-    return Boolean(getAppsScriptUrl());
+    return Boolean(getAppsScriptUrl() || serverWebhookConfigured);
+  }
+
+  export function hasServerSyncCapability(): boolean {
+    return Boolean(isAutoSyncConfigured() || getGoogleAccessToken() || serverServiceAccountConfigured);
   }
 
   /**
    * Send payload to Google Apps Script Webhook.
-   * Uses standard text/plain fetch first, then Node server proxy (/api/google/webhook-sync),
-   * and finally browser no-cors fallback on static deployments.
+   * Tries Node server proxy first (when available, bypasses CORS & shares server config),
+   * then direct text/plain fetch, then browser no-cors fallback on static deployments.
    */
   export async function sendToAppsScriptWebhook(
     payload: any
   ): Promise<{ success: boolean; data?: any; error?: string }> {
     const url = getAppsScriptUrl();
-    if (!url) {
-      return { success: false, error: 'URL Google Apps Script Webhook belum dikonfigurasi.' };
-    }
 
     try {
       // 1. Direct fetch (gets full JSON confirmation when browser allows Apps Script redirect)
-      try {
-        const response = await fetch(url, {
+      if (url) {
+        try {
+          const response = await fetchWithTimeout(
+            url,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'text/plain;charset=utf-8',
+              },
+              body: JSON.stringify(payload),
+            },
+            10000
+          );
+
+          if (response.ok) {
+            const rawText = await response.text();
+            try {
+              const resData = JSON.parse(rawText);
+              if (resData?.status === 'error') {
+                return { success: false, error: resData.message || 'Apps Script error' };
+              }
+              return { success: true, data: resData };
+            } catch {
+              // Non-JSON (e.g. HTML permission redirect page) -> fall through to server proxy
+            }
+          }
+        } catch (err: any) {
+          console.warn('Direct webhook fetch note, trying server proxy:', err);
+        }
+      }
+
+      // 2. Server-side proxy (bypasses browser CORS and can use server-persisted webhookUrl!)
+      if (url || serverWebhookConfigured) {
+        try {
+          const proxyRes = await fetchWithTimeout(
+            '/api/google/webhook-sync',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: url || undefined, payload }),
+            },
+            10000
+          );
+          if (proxyRes.ok) {
+            const proxyJson = await proxyRes.json();
+            if (proxyJson?.success) {
+              return { success: true, data: proxyJson.data };
+            }
+          } else if (proxyRes.status === 502) {
+            const errJson = await proxyRes.json().catch(() => null);
+            if (errJson?.error) {
+              return { success: false, error: errJson.error };
+            }
+          }
+        } catch (proxyErr) {
+          console.warn('Webhook server proxy unavailable, using no-cors fallback:', proxyErr);
+        }
+      }
+
+      if (!url) {
+        return { success: false, error: 'URL Google Apps Script Webhook belum dikonfigurasi oleh Admin.' };
+      }
+
+      // 3. Final fallback for static hosts: no-cors POST
+      await fetchWithTimeout(
+        url,
+        {
           method: 'POST',
+          mode: 'no-cors',
           headers: {
             'Content-Type': 'text/plain;charset=utf-8',
           },
           body: JSON.stringify(payload),
-        });
-
-        if (response.ok) {
-          const resData = await response.json();
-          if (resData?.status === 'error') {
-            return { success: false, error: resData.message || 'Apps Script error' };
-          }
-          return { success: true, data: resData };
-        }
-      } catch (err: any) {
-        console.warn('Direct webhook fetch note, trying server proxy:', err);
-      }
-
-      // 2. Server-side proxy (bypasses browser CORS and reads exact Apps Script JSON)
-      try {
-        const proxyRes = await fetch('/api/google/webhook-sync', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url, payload }),
-        });
-        if (proxyRes.ok) {
-          const proxyJson = await proxyRes.json();
-          if (proxyJson?.success) {
-            return { success: true, data: proxyJson.data };
-          }
-        }
-      } catch (proxyErr) {
-        console.warn('Webhook server proxy unavailable, using no-cors fallback:', proxyErr);
-      }
-
-      // 3. Final fallback for static hosts: no-cors POST
-      await fetch(url, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: {
-          'Content-Type': 'text/plain;charset=utf-8',
         },
-        body: JSON.stringify(payload),
-      });
+        8000
+      );
 
       return { 
         success: true, 
@@ -1225,29 +1380,28 @@ export async function syncAllDataToGoogleSheets(
 
   /**
    * Automatic background synchronization for a single form document.
-   * Tries Webhook first (no login required for staff!), then Google OAuth if available.
+   * Strips heavy base64 images/files so webhook requests stay fast and within Apps Script limits.
    */
   export async function autoSyncFormToGoogleSheet(
     doc: FormDocument,
     rowIndex?: number
   ): Promise<{ synced: boolean; method: string; rowNumber?: number; sheetTitle?: string; error?: string }> {
-    const row = formatFormRow(doc, rowIndex || 1);
+    const safeDoc = sanitizeFormForWebhook(doc);
+    const row = formatFormRow(safeDoc, rowIndex || 1);
 
-    // Method 1: Google Apps Script Webhook (ZERO LOGIN, WORKS 100% ON VERCEL)
-    if (isAutoSyncConfigured()) {
-      const webhookRes = await sendToAppsScriptWebhook({
-        action: 'append_form',
-        form: doc,
-        row,
-      });
-      if (webhookRes.success) {
-        return {
-          synced: true,
-          method: 'webhook',
-          rowNumber: webhookRes.data?.rowNumber,
-          sheetTitle: webhookRes.data?.sheetTitle || TAB_REKAPAN_FORM,
-        };
-      }
+    // Method 1: Google Apps Script Webhook (local URL or server-stored global URL)
+    const webhookRes = await sendToAppsScriptWebhook({
+      action: 'append_form',
+      form: safeDoc,
+      row,
+    });
+    if (webhookRes.success) {
+      return {
+        synced: true,
+        method: 'webhook',
+        rowNumber: webhookRes.data?.rowNumber,
+        sheetTitle: webhookRes.data?.sheetTitle || TAB_REKAPAN_FORM,
+      };
     }
 
     // Method 2: Google Sheets API via OAuth token
@@ -1267,7 +1421,7 @@ export async function syncAllDataToGoogleSheets(
     return {
       synced: false,
       method: 'none',
-      error: 'Belum ada Webhook Google Apps Script atau Google OAuth yang terhubung.',
+      error: webhookRes.error || 'Belum ada Webhook Google Apps Script atau Google OAuth yang terhubung.',
     };
   }
 
@@ -1351,7 +1505,8 @@ export async function syncAllDataToGoogleSheets(
       return { success: false, count: 0, error: 'URL Webhook Google Apps Script belum disetel.' };
     }
 
-    const rows = forms.map((doc, idx) => formatFormRow(doc, idx + 1));
+    const safeForms = forms.map(sanitizeFormForWebhook);
+    const rows = safeForms.map((doc, idx) => formatFormRow(doc, idx + 1));
     const safeUsers = (users || []).map(({ signatureUrl, password: _pwd, ...rest }) => ({
       ...rest,
       hasSignature: Boolean(signatureUrl),
@@ -1362,13 +1517,13 @@ export async function syncAllDataToGoogleSheets(
       // 1. Try batch sync first
       const batchRes = await sendToAppsScriptWebhook({
         action: 'batch_sync',
-        forms,
+        forms: safeForms,
         rows,
         users: safeUsers,
       });
 
       if (batchRes.success) {
-        return { success: true, count: forms.length };
+        return { success: true, count: safeForms.length };
       }
     } catch (err) {
       console.warn('Batch webhook note, falling back to sequential sync:', err);
@@ -1376,10 +1531,10 @@ export async function syncAllDataToGoogleSheets(
 
     // 2. Sequential fallback
     let sent = 0;
-    for (let i = 0; i < forms.length; i++) {
+    for (let i = 0; i < safeForms.length; i++) {
       const single = await sendToAppsScriptWebhook({
         action: 'append_form',
-        form: forms[i],
+        form: safeForms[i],
         row: rows[i],
       });
       if (single.success) sent++;
@@ -1442,67 +1597,109 @@ export async function syncAllDataToGoogleSheets(
   }
 
   /**
-   * Read all transactions from Google Sheet via Apps Script Webhook (cache-busted).
-   * This powers the exact 2-way mirroring (menampilkan data dari sheet "Rekapan Form" di web portal).
+   * Read all transactions from Google Sheet via Apps Script Webhook, Server API, or OAuth.
+   * Powers exact 2-way mirroring (menampilkan data dari sheet "Rekapan Form" di web portal).
    */
   export async function fetchFormsFromAppsScriptWebhook(): Promise<{
     success: boolean;
-    forms: FormDocument[];
+    forms: Partial<FormDocument>[];
     error?: string;
   }> {
     const url = getAppsScriptUrl();
-    if (!url) {
-      return { success: false, forms: [], error: 'URL Webhook Google Apps Script belum disetel.' };
-    }
 
     try {
       // 1. Cache-busted GET directly to Apps Script Web App
-      try {
-        const sep = url.includes('?') ? '&' : '?';
-        const cacheBustUrl = `${url}${sep}action=get_forms&_t=${Date.now()}`;
-        const getRes = await fetch(cacheBustUrl, {
-          method: 'GET',
-          cache: 'no-store',
-          redirect: 'follow',
-        });
-        if (getRes.ok) {
-          const data = await getRes.json();
-          if (data && Array.isArray(data.forms)) {
-            return { success: true, forms: data.forms };
+      if (url) {
+        try {
+          const sep = url.includes('?') ? '&' : '?';
+          const cacheBustUrl = `${url}${sep}action=get_forms&_t=${Date.now()}`;
+          const getRes = await fetchWithTimeout(
+            cacheBustUrl,
+            {
+              method: 'GET',
+              cache: 'no-store',
+              redirect: 'follow',
+            },
+            10000
+          );
+          if (getRes.ok) {
+            const rawText = await getRes.text();
+            try {
+              const data = JSON.parse(rawText);
+              if (data && Array.isArray(data.forms)) {
+                return { success: true, forms: data.forms };
+              }
+            } catch {
+              // Fall through to server proxy if HTML or non-JSON
+            }
           }
+        } catch (getErr) {
+          console.warn('Direct GET from webhook note, trying server proxy / POST:', getErr);
         }
-      } catch (getErr) {
-        console.warn('Direct GET from webhook note, trying server proxy / POST:', getErr);
       }
 
-      // 2. Server-side proxy attempt (cleanly handles Apps Script redirects if CORS blocks client GET)
+      // 2. Server-side /api/google/forms & /api/google/webhook-sync (works even if URL is only on server or Service Account is active!)
+      if (url || serverWebhookConfigured) {
+        try {
+          const proxyRes = await fetchWithTimeout(
+            '/api/google/webhook-sync',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: url || undefined, payload: { action: 'get_forms' } }),
+            },
+            10000
+          );
+          if (proxyRes.ok) {
+            const proxyJson = await proxyRes.json();
+            if (proxyJson?.success && Array.isArray(proxyJson?.data?.forms)) {
+              serverWebhookConfigured = true;
+              return { success: true, forms: proxyJson.data.forms };
+            }
+          }
+        } catch (proxyErr) {
+          console.warn('Proxy fetch forms note, trying /api/google/forms / POST:', proxyErr);
+        }
+      }
+
       try {
-        const proxyRes = await fetch('/api/google/webhook-sync', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url, payload: { action: 'get_forms' } }),
-        });
-        if (proxyRes.ok) {
-          const proxyJson = await proxyRes.json();
-          if (proxyJson?.success && Array.isArray(proxyJson?.data?.forms)) {
-            return { success: true, forms: proxyJson.data.forms };
+        const apiFormsRes = await fetchWithTimeout('/api/google/forms', { cache: 'no-store' }, 8000);
+        if (apiFormsRes.ok) {
+          const apiData = await apiFormsRes.json();
+          if (apiData?.success && Array.isArray(apiData.forms)) {
+            return { success: true, forms: apiData.forms };
           }
         }
-      } catch (proxyErr) {
-        console.warn('Proxy fetch forms note, trying direct POST:', proxyErr);
+      } catch {
+        // Ignore if static hosting
       }
 
       // 3. Direct POST with text/plain action 'get_forms'
-      const postRes = await fetch(url, {
-        method: 'POST',
-        cache: 'no-store',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action: 'get_forms' }),
-      });
-      if (postRes.ok) {
-        const pData = await postRes.json();
-        if (pData && Array.isArray(pData.forms)) {
-          return { success: true, forms: pData.forms };
+      if (url) {
+        const postRes = await fetchWithTimeout(
+          url,
+          {
+            method: 'POST',
+            cache: 'no-store',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action: 'get_forms' }),
+          },
+          10000
+        );
+        if (postRes.ok) {
+          const pData = await postRes.json();
+          if (pData && Array.isArray(pData.forms)) {
+            return { success: true, forms: pData.forms };
+          }
+        }
+      }
+
+      // 4. Google Sheets API via OAuth token (if connected)
+      const token = getGoogleAccessToken();
+      if (token) {
+        const oauthRes = await fetchFormsFromGoogleSheetsOAuth(token);
+        if (oauthRes.success) {
+          return { success: true, forms: oauthRes.forms };
         }
       }
     } catch (err: any) {
@@ -1514,15 +1711,16 @@ export async function syncAllDataToGoogleSheets(
   }
 
   /**
-   * Push edited form data to Google Sheet row in background
+   * Push edited form data to Google Sheet row in background (sanitized lightweight payload)
    */
   export async function autoUpdateFormInGoogleSheet(doc: FormDocument): Promise<boolean> {
     if (!isAutoSyncConfigured()) return false;
-    const row = formatFormRow(doc, doc.sequenceNumber || 1);
+    const safeDoc = sanitizeFormForWebhook(doc);
+    const row = formatFormRow(safeDoc, safeDoc.sequenceNumber || 1);
     const res = await sendToAppsScriptWebhook({
       action: 'update_form',
-      docNumber: doc.docNumber,
-      form: doc,
+      docNumber: safeDoc.docNumber,
+      form: safeDoc,
       row,
     });
     return res.success;

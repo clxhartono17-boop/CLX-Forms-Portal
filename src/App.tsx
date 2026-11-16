@@ -23,8 +23,18 @@ function MainApp() {
   };
 
   const handleFormCreated = (createdDoc: FormDocument) => {
-    showNotification(`Form ${createdDoc.docNumber} berhasil dibuat dan otomatis terinput ke "Rekapan Form"!`);
+    if (createdDoc.googleSheets?.synced) {
+      showNotification(
+        `Form ${createdDoc.docNumber} berhasil dibuat dan otomatis tersinkronisasi ke "${createdDoc.googleSheets.sheetName || 'Rekapan Form'}"!`
+      );
+    } else {
+      showNotification(
+        `Form ${createdDoc.docNumber} berhasil disimpan di portal CLX (sinkronisasi Google Sheet menunggu aktivasi Webhook Admin).`,
+        'info'
+      );
+    }
     setActiveTab('dashboard');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   return (
@@ -39,11 +49,11 @@ function MainApp() {
       {/* Notification Toast */}
       {notification && (
         <div className="w-full max-w-[1720px] 2xl:max-w-[1850px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 pt-4">
-          <div className="bg-emerald-600 text-white text-xs font-semibold px-4 py-2.5 rounded-lg shadow-md flex items-center justify-between">
+          <div className={`${notification.type === 'info' ? 'bg-amber-600' : 'bg-emerald-600'} text-white text-xs font-semibold px-4 py-2.5 rounded-lg shadow-md flex items-center justify-between`}>
             <span>{notification.message}</span>
             <button
               onClick={() => setNotification(null)}
-              className="text-white hover:text-emerald-200 ml-4"
+              className="text-white hover:opacity-80 ml-4"
             >
               &times;
             </button>
