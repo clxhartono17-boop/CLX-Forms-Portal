@@ -1,4 +1,4 @@
-import { FormDocument, FormType, ApprovalStatus, UserRole, Division } from '../types/index.ts';
+import type { FormDocument, FormType, ApprovalStatus, UserRole, Division } from '../types/index.ts';
 import { requiresCeoApproval } from './approvalRules.ts';
 
 /**

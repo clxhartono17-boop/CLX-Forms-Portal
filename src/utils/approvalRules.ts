@@ -1,4 +1,4 @@
-import { ApprovalStatus, UserRole } from '../types/index.ts';
+import type { ApprovalStatus, UserRole } from '../types/index.ts';
 
 export const CEO_APPROVAL_THRESHOLD = 10_000_000; // Rp 10.000.000
 
