@@ -1,10 +1,18 @@
-import React, { useState, useEffect, useId } from 'react';
+import React, { useState, useEffect, useId, useRef, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { useForms } from '../context/FormContext.tsx';
 import { FormType, Division, FormItem, FormAttachment, FormDocument } from '../types/index.ts';
 import { generateDocNumber } from '../utils/romanNumerals.ts';
 import { terbilangRupiah } from '../utils/terbilang.ts';
 import { PhysicalFormPreview } from './PhysicalFormPreview.tsx';
+import {
+  DEFAULT_INITIAL_ITEM,
+  FormDraftInput,
+  clearFormDraft,
+  hasMeaningfulDraftContent,
+  loadFormDraft,
+  saveFormDraft,
+} from '../utils/formDraft.ts';
 import { 
   Plus, 
   Trash2, 
@@ -23,7 +31,10 @@ import {
   ExternalLink,
   RefreshCw,
   Copy,
-  Check
+  Check,
+  WifiOff,
+  BookmarkCheck,
+  RotateCcw
 } from 'lucide-react';
 import { SPREADSHEET_URL, copyFormsToClipboard, isAutoSyncConfigured } from '../utils/googleWorkspace.ts';
 
@@ -68,33 +79,221 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
   const [bankAccountName, setBankAccountName] = useState(currentUser?.name || '');
   const [copiedSingleDoc, setCopiedSingleDoc] = useState(false);
 
-  // Keep state synchronized whenever currentUser changes
-  useEffect(() => {
-    if (currentUser) {
-      setRequesterName(currentUser.name);
-      setRequesterRole(currentUser.title || `${currentUser.role} (${currentUser.division})`);
-      setDivision(currentUser.division || 'Finance');
-      setBankAccountName(currentUser.name);
-    }
-  }, [currentUser]);
-
   // Line items state
-  const [items, setItems] = useState<FormItem[]>([
-    {
-      id: 'item-1',
-      description: 'Biaya Port Handling & Forklift Pelabuhan Tanjung Priok',
-      qty: 1,
-      unit: 'Lot',
-      unitPrice: 1500000,
-      total: 1500000,
-    },
-  ]);
+  const [items, setItems] = useState<FormItem[]>([{ ...DEFAULT_INITIAL_ITEM }]);
 
   // Attachments
   const [attachments, setAttachments] = useState<FormAttachment[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showLivePreview, setShowLivePreview] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+
+  // Draft & Offline resilience states
+  const [isOnline, setIsOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
+  const [isHydrated, setIsHydrated] = useState(false);
+  const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
+  const [draftRestoredAt, setDraftRestoredAt] = useState<string | null>(null);
+  const [draftAttachmentsWarning, setDraftAttachmentsWarning] = useState(false);
+  const [manualDraftFeedback, setManualDraftFeedback] = useState<string | null>(null);
+  const hydratedEmailRef = useRef<string | null>(null);
+  const explicitDraftRef = useRef<boolean>(false);
+
+  // Hydrate either saved draft OR currentUser defaults without clobbering restored draft values
+  useEffect(() => {
+    if (!currentUser) {
+      hydratedEmailRef.current = null;
+      setIsHydrated(false);
+      return;
+    }
+
+    const normalizedEmail = currentUser.email.toLowerCase();
+    if (hydratedEmailRef.current === normalizedEmail) return;
+    hydratedEmailRef.current = normalizedEmail;
+
+    const existingDraft = loadFormDraft(currentUser.email);
+    if (existingDraft && hasMeaningfulDraftContent(existingDraft)) {
+      explicitDraftRef.current = Boolean(existingDraft.explicitlySaved);
+      setFormType(existingDraft.formType || 'FPU');
+      setSelectedDate(existingDraft.selectedDate || new Date().toISOString().split('T')[0]);
+      setDivision(existingDraft.division || currentUser.division || 'Finance');
+      setRequesterName(existingDraft.requesterName || currentUser.name);
+      setRequesterRole(
+        existingDraft.requesterRole ||
+          currentUser.title ||
+          `${currentUser.role} (${currentUser.division})`
+      );
+      setPurpose(existingDraft.purpose || '');
+      setNotes(existingDraft.notes || '');
+      setPaymentMethod(existingDraft.paymentMethod || 'Bank Transfer');
+      setBankName(existingDraft.bankName || 'BCA (Bank Central Asia)');
+      setBankAccountNo(existingDraft.bankAccountNo || '8830192831');
+      setBankAccountName(existingDraft.bankAccountName || currentUser.name);
+      setItems(
+        existingDraft.items && existingDraft.items.length > 0
+          ? existingDraft.items.map(it => {
+              const q = Number(it.qty) || 0;
+              const p = Number(it.unitPrice) || 0;
+              return { ...it, qty: q, unitPrice: p, total: q * p };
+            })
+          : [{ ...DEFAULT_INITIAL_ITEM }]
+      );
+      setAttachments(existingDraft.attachments || []);
+      setDraftRestoredAt(existingDraft.savedAt);
+      setDraftSavedAt(existingDraft.savedAt);
+      setDraftAttachmentsWarning(Boolean(existingDraft.attachmentsStripped));
+    } else {
+      explicitDraftRef.current = false;
+      setRequesterName(currentUser.name);
+      setRequesterRole(currentUser.title || `${currentUser.role} (${currentUser.division})`);
+      setDivision(currentUser.division || 'Finance');
+      setBankAccountName(currentUser.name);
+      setDraftRestoredAt(null);
+      setDraftSavedAt(null);
+      setDraftAttachmentsWarning(false);
+    }
+    setIsHydrated(true);
+  }, [currentUser]);
+
+  const buildDraftPayload = useCallback(
+    (explicitlySaved = explicitDraftRef.current): FormDraftInput => ({
+      userEmail: currentUser?.email || 'guest',
+      formType,
+      selectedDate,
+      division,
+      requesterName,
+      requesterRole,
+      purpose,
+      notes,
+      paymentMethod,
+      bankName,
+      bankAccountNo,
+      bankAccountName,
+      items,
+      attachments,
+      explicitlySaved,
+    }),
+    [
+      currentUser?.email,
+      formType,
+      selectedDate,
+      division,
+      requesterName,
+      requesterRole,
+      purpose,
+      notes,
+      paymentMethod,
+      bankName,
+      bankAccountNo,
+      bankAccountName,
+      items,
+      attachments,
+    ]
+  );
+
+  // Latest payload ref for synchronous flush on offline/pagehide
+  const latestPayloadRef = useRef<FormDraftInput | null>(null);
+  useEffect(() => {
+    latestPayloadRef.current = buildDraftPayload();
+  }, [buildDraftPayload]);
+
+  // Monitor browser online/offline state and flush draft immediately if connection drops
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => {
+      setIsOnline(false);
+      const payload = latestPayloadRef.current;
+      if (payload && (hasMeaningfulDraftContent(payload) || explicitDraftRef.current)) {
+        const res = saveFormDraft(payload);
+        if (res.saved) {
+          setDraftSavedAt(res.savedAt);
+          setDraftAttachmentsWarning(res.attachmentsStripped);
+        }
+      }
+    };
+    const handlePageHide = () => {
+      const payload = latestPayloadRef.current;
+      if (payload && (hasMeaningfulDraftContent(payload) || explicitDraftRef.current)) {
+        saveFormDraft(payload);
+      }
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('beforeunload', handlePageHide);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('beforeunload', handlePageHide);
+    };
+  }, []);
+
+  // Automatic debounced draft save on every field edit
+  useEffect(() => {
+    if (!isHydrated || !currentUser || successModalDoc) return;
+    const payload = buildDraftPayload();
+    if (!hasMeaningfulDraftContent(payload) && !explicitDraftRef.current) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      const res = saveFormDraft(payload);
+      if (res.saved) {
+        setDraftSavedAt(res.savedAt);
+        setDraftAttachmentsWarning(res.attachmentsStripped);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [isHydrated, currentUser, successModalDoc, buildDraftPayload]);
+
+  const handleManualSaveDraft = () => {
+    if (!currentUser) return;
+    explicitDraftRef.current = true;
+    const payload = buildDraftPayload(true);
+    const res = saveFormDraft(payload);
+    if (res.saved) {
+      setDraftSavedAt(res.savedAt);
+      setDraftAttachmentsWarning(res.attachmentsStripped);
+      const timeLabel = new Date(res.savedAt).toLocaleTimeString('id-ID');
+      setManualDraftFeedback(
+        res.attachmentsStripped
+          ? `Draft formulir tersimpan secara lokal pukul ${timeLabel} (tanpa file lampiran berukuran besar). Aman saat internet terputus.`
+          : `Draft formulir tersimpan secara lokal pukul ${timeLabel}. Pekerjaan Anda aman meski internet terputus atau halaman dimuat ulang.`
+      );
+    } else {
+      setValidationError(res.error || 'Gagal menyimpan draft lokal di browser.');
+    }
+  };
+
+  const handleDiscardDraft = () => {
+    clearFormDraft(currentUser?.email);
+    explicitDraftRef.current = false;
+    setFormType('FPU');
+    setSelectedDate(new Date().toISOString().split('T')[0]);
+    setDivision(currentUser?.division || 'Finance');
+    setRequesterName(currentUser?.name || '');
+    setRequesterRole(
+      currentUser?.title ||
+        (currentUser ? `${currentUser.role} (${currentUser.division})` : 'Staff (Maker)')
+    );
+    setPurpose('');
+    setNotes('');
+    setPaymentMethod('Bank Transfer');
+    setBankName('BCA (Bank Central Asia)');
+    setBankAccountNo('8830192831');
+    setBankAccountName(currentUser?.name || '');
+    setItems([{ ...DEFAULT_INITIAL_ITEM }]);
+    setAttachments([]);
+    setDraftRestoredAt(null);
+    setDraftSavedAt(null);
+    setDraftAttachmentsWarning(false);
+    setManualDraftFeedback(null);
+    setValidationError(null);
+  };
 
   // Auto-numbering calculation
   const sequence = getNextSequence(formType);
@@ -216,6 +415,19 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
   };
 
   const executeSave = async () => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      explicitDraftRef.current = true;
+      const res = saveFormDraft(buildDraftPayload(true));
+      if (res.saved) {
+        setDraftSavedAt(res.savedAt);
+        setDraftAttachmentsWarning(res.attachmentsStripped);
+      }
+      setValidationError(
+        'Koneksi internet sedang terputus (Offline). Data formulir Anda sudah tersimpan otomatis sebagai Draft lokal — silakan ajukan kembali saat internet tersambung.'
+      );
+      return;
+    }
+
     setIsSubmitting(true);
     setValidationError(null);
     try {
@@ -225,9 +437,21 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
       };
 
       const savedDoc = await addForm(newDoc);
+      clearFormDraft(currentUser?.email);
+      explicitDraftRef.current = false;
+      setDraftRestoredAt(null);
+      setDraftSavedAt(null);
+      setManualDraftFeedback(null);
       setSuccessModalDoc(savedDoc);
     } catch (err: any) {
-      setValidationError(err?.message || 'Gagal menyimpan dokumen. Silakan periksa kembali.');
+      explicitDraftRef.current = true;
+      const res = saveFormDraft(buildDraftPayload(true));
+      if (res.saved) {
+        setDraftSavedAt(res.savedAt);
+      }
+      setValidationError(
+        `${err?.message || 'Gagal mengirim dokumen ke server.'} Data formulir Anda tetap tersimpan aman di Draft lokal.`
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -309,7 +533,20 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
           </p>
         </div>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {draftSavedAt && (
+            <span
+              data-testid="draft-status-indicator"
+              className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200"
+            >
+              <BookmarkCheck className="w-3.5 h-3.5 text-emerald-600" />
+              <span>
+                Draft tersimpan lokal pukul{' '}
+                {new Date(draftSavedAt).toLocaleTimeString('id-ID')}
+              </span>
+            </span>
+          )}
+
           <button
             type="button"
             onClick={() => setShowLivePreview(false)}
@@ -337,6 +574,76 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
           </button>
         </div>
       </div>
+
+      {/* Offline Connection Warning Banner */}
+      {!isOnline && (
+        <div
+          data-testid="offline-draft-banner"
+          className="flex items-start space-x-3 bg-amber-50 border border-amber-300 text-amber-950 text-xs px-4 py-3 rounded-xl shadow-2xs"
+        >
+          <WifiOff className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+          <div className="space-y-0.5">
+            <div className="font-bold">Koneksi Internet Terputus (Mode Offline)</div>
+            <p className="text-[11px] text-amber-900 leading-relaxed">
+              Seluruh perubahan Anda tetap <strong>tersimpan otomatis sebagai Draft lokal</strong> di browser ini. Anda tidak perlu mengulang dari awal — tekan <strong>Simpan Draft</strong> atau lanjutkan pengisian dan ajukan saat koneksi internet kembali normal.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Restored Draft Notification Banner */}
+      {draftRestoredAt && (
+        <div
+          data-testid="restored-draft-banner"
+          className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-indigo-50 border border-indigo-200 text-indigo-950 text-xs px-4 py-3 rounded-xl shadow-2xs"
+        >
+          <div className="flex items-start space-x-2.5">
+            <BookmarkCheck className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+            <div>
+              <div className="font-bold">
+                Draft Formulir Dipulihkan (disimpan {new Date(draftRestoredAt).toLocaleString('id-ID')})
+              </div>
+              <p className="text-[11px] text-indigo-800 mt-0.5">
+                Isian terakhir Anda dimuat kembali secara otomatis agar tidak perlu mengulang dari awal.
+                {draftAttachmentsWarning && (
+                  <span className="block text-amber-800 font-semibold mt-0.5">
+                    Catatan: File lampiran berukuran besar tidak dapat disimpan di cache lokal browser — harap unggah ulang lampiran bila diperlukan.
+                  </span>
+                )}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleDiscardDraft}
+            className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-white hover:bg-red-50 text-red-700 border border-indigo-200 hover:border-red-300 rounded-lg text-xs font-bold transition shrink-0 self-start sm:self-auto"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Hapus Draft & Mulai Kosong</span>
+          </button>
+        </div>
+      )}
+
+      {/* Manual Save Draft Feedback Banner */}
+      {manualDraftFeedback && (
+        <div
+          data-testid="manual-draft-feedback"
+          className="flex items-center justify-between bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs px-4 py-3 rounded-xl"
+        >
+          <div className="flex items-center space-x-2">
+            <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span className="font-medium">{manualDraftFeedback}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setManualDraftFeedback(null)}
+            className="text-emerald-700 hover:text-emerald-950 font-bold ml-3"
+          >
+            &times;
+          </button>
+        </div>
+      )}
 
       {validationError && (
         <div className="flex items-center space-x-2 bg-red-50 border border-red-200 text-red-800 text-xs px-4 py-3 rounded-lg">
@@ -800,32 +1107,83 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
             </div>
           )}
 
-          {/* Action Buttons */}
-          <div className="flex items-center justify-end space-x-3 pt-2">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition"
-            >
-              Batal
-            </button>
+          {/* Action Buttons & Local Draft Feedback */}
+          <div className="space-y-2.5 pt-2">
+            {manualDraftFeedback && (
+              <div
+                data-testid="manual-draft-feedback-bottom"
+                className="flex items-center justify-between bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs px-4 py-2.5 rounded-xl"
+              >
+                <div className="flex items-center space-x-2">
+                  <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span className="font-medium">{manualDraftFeedback}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setManualDraftFeedback(null)}
+                  className="text-emerald-700 hover:text-emerald-950 font-bold ml-3"
+                >
+                  &times;
+                </button>
+              </div>
+            )}
 
-            <button
-              type="button"
-              onClick={() => setShowLivePreview(true)}
-              className="px-4 py-2 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition"
-            >
-              Preview Form Fisik
-            </button>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="text-[11px] text-slate-500">
+                {!isOnline ? (
+                  <span className="inline-flex items-center space-x-1.5 text-amber-800 font-semibold">
+                    <WifiOff className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Offline: isian tersimpan otomatis di Draft lokal</span>
+                  </span>
+                ) : draftSavedAt ? (
+                  <span className="inline-flex items-center space-x-1.5 text-emerald-700 font-medium">
+                    <BookmarkCheck className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>
+                      Auto-draft aktif (tersimpan pukul{' '}
+                      {new Date(draftSavedAt).toLocaleTimeString('id-ID')})
+                    </span>
+                  </span>
+                ) : (
+                  <span>Auto-draft aktif menyimpan isian Anda secara berkala.</span>
+                )}
+              </div>
 
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="inline-flex items-center space-x-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm transition disabled:opacity-50"
-            >
-              <Save className="w-4 h-4" />
-              <span>{isSubmitting ? 'Menyimpan & Menulis ke Sheet...' : 'Simpan & Ajukan Form'}</span>
-            </button>
+              <div className="flex flex-wrap items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={onCancel}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition"
+                >
+                  Batal
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleManualSaveDraft}
+                  className="inline-flex items-center space-x-1.5 px-4 py-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-lg transition"
+                >
+                  <BookmarkCheck className="w-4 h-4 text-emerald-700" />
+                  <span>Simpan Draft</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowLivePreview(true)}
+                  className="px-4 py-2 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition"
+                >
+                  Preview Form Fisik
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="inline-flex items-center space-x-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm transition disabled:opacity-50"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>{isSubmitting ? 'Menyimpan & Menulis ke Sheet...' : 'Simpan & Ajukan Form'}</span>
+                </button>
+              </div>
+            </div>
           </div>
         </form>
       )}

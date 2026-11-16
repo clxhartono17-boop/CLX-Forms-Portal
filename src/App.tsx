@@ -104,7 +104,7 @@ function MainApp() {
         {activeTab === 'create' && (
           <FormCreator
             onSuccess={handleFormCreated}
-            onCancel={() => setActiveTab(isCLevel ? 'dashboard' : 'create')}
+            onCancel={() => setActiveTab('dashboard')}
           />
         )}
 

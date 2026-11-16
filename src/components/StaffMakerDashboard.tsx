@@ -30,10 +30,13 @@ import {
   User as UserIcon,
   HelpCircle,
   Zap,
-  Edit3
+  Edit3,
+  BookmarkCheck,
+  Trash2
 } from 'lucide-react';
 import { GoogleAutoSyncModal } from './GoogleAutoSyncModal.tsx';
 import { FormEditModal } from './FormEditModal.tsx';
+import { clearFormDraft, hasMeaningfulDraftContent, loadFormDraft } from '../utils/formDraft.ts';
 
 interface StaffMakerDashboardProps {
   onSelectDoc: (doc: FormDocument) => void;
@@ -50,6 +53,15 @@ export const StaffMakerDashboard: React.FC<StaffMakerDashboardProps> = ({
   const [editingDoc, setEditingDoc] = useState<FormDocument | null>(null);
   const [showAutoSyncModal, setShowAutoSyncModal] = useState(false);
   const autoSyncOn = isAutoSyncConfigured();
+  const [savedDraft, setSavedDraft] = useState(() => {
+    const d = loadFormDraft(currentUser?.email);
+    return d && hasMeaningfulDraftContent(d) ? d : null;
+  });
+
+  React.useEffect(() => {
+    const d = loadFormDraft(currentUser?.email);
+    setSavedDraft(d && hasMeaningfulDraftContent(d) ? d : null);
+  }, [currentUser?.email]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedType, setSelectedType] = useState<string>('ALL');
@@ -153,6 +165,57 @@ export const StaffMakerDashboard: React.FC<StaffMakerDashboardProps> = ({
           <span>+ Buat Form Baru</span>
         </button>
       </div>
+
+      {/* Pending Local Draft Resume Banner */}
+      {savedDraft && (
+        <div
+          data-testid="dashboard-draft-banner"
+          className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs"
+        >
+          <div className="flex items-start space-x-3">
+            <div className="w-9 h-9 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+              <BookmarkCheck className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-bold text-indigo-950">
+                  Draft Formulir Tersimpan ({savedDraft.formType})
+                </span>
+                <span className="text-[11px] font-medium text-indigo-700">
+                  Disimpan {new Date(savedDraft.savedAt).toLocaleString('id-ID')}
+                </span>
+              </div>
+              <p className="text-[11px] text-indigo-900 mt-0.5 line-clamp-1">
+                {savedDraft.purpose?.trim()
+                  ? `Keperluan: "${savedDraft.purpose}"`
+                  : `Divisi ${savedDraft.division} • ${savedDraft.items.length} baris rincian`}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                clearFormDraft(currentUser?.email);
+                setSavedDraft(null);
+              }}
+              className="inline-flex items-center space-x-1 px-3 py-1.5 text-xs font-semibold text-red-700 bg-white hover:bg-red-50 border border-indigo-200 hover:border-red-300 rounded-lg transition"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Hapus Draft</span>
+            </button>
+            <button
+              type="button"
+              onClick={onCreateNew}
+              className="inline-flex items-center space-x-1.5 px-4 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition"
+            >
+              <span>Lanjutkan Draft</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Google Sheets Auto-Sync Status Banner (Admin Only: clx.hartono17@gmail.com) */}
       {isAdmin && (
