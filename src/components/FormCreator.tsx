@@ -73,7 +73,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
   const [requesterRole, setRequesterRole] = useState(currentUser?.title || 'Staff (Maker)');
   const [purpose, setPurpose] = useState('');
   const [notes, setNotes] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'Bank Transfer' | 'Cash' | 'Giro / Cheque'>('Bank Transfer');
+  const [paymentMethod, setPaymentMethod] = useState<'Bank Transfer' | 'Cash' | 'Giro / Cheque' | 'Virtual Account'>('Bank Transfer');
   const [bankName, setBankName] = useState('BCA (Bank Central Asia)');
   const [bankAccountNo, setBankAccountNo] = useState('8830192831');
   const [bankAccountName, setBankAccountName] = useState(currentUser?.name || '');
@@ -675,7 +675,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
           {/* 1. Form Type Selector */}
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
             <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-              1. Pilih Jenis Formulir (Form Type)
+1. Pilih Jenis Formulir (Form Type)
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {[
@@ -727,7 +727,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
           {/* 2. Metadata Section: Division, Date, Requester */}
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
             <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-              2. Data Dokumen & Divisi
+2. Data Dokumen & Divisi
             </label>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -797,7 +797,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
           {/* 3. Payment & Bank Information */}
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
             <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-              3. Metode Pembayaran & Rekening Penerima
+3. Metode Pembayaran & Rekening Penerima
             </label>
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -811,6 +811,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
                   className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs font-medium text-slate-900 focus:ring-2 focus:ring-blue-500 focus:bg-white"
                 >
                   <option value="Bank Transfer">Bank Transfer</option>
+                  <option value="Virtual Account">Virtual Account</option>
                   <option value="Cash">Cash (Kas Bon Tunai)</option>
                   <option value="Giro / Cheque">Giro / Cek</option>
                 </select>
@@ -861,7 +862,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
             <div className="flex items-center justify-between">
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                4. Rincian Barang / Komponen Biaya (Line Items)
+4. Rincian Barang / Komponen Biaya (Line Items)
               </label>
               <button
                 type="button"
@@ -979,7 +980,7 @@ export const FormCreator: React.FC<FormCreatorProps> = ({ onSuccess, onCancel })
             <div className="flex items-center justify-between">
               <div>
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                  5. Lampiran Dokumen & Integrasi Google Drive
+5. Lampiran Dokumen & Integrasi Google Drive
                 </label>
                 <p className="text-[11px] text-slate-500 mt-0.5">
                   File pendukung (PDF, JPG, PNG) akan digabungkan otomatis ke dalam satu single PDF via pdf-lib dan diupload ke Google Drive.
