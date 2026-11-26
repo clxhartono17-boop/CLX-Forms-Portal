@@ -1,12 +1,34 @@
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { FormDocument } from '../types/index.ts';
 import { requiresCeoApproval } from './approvalRules.ts';
+import { terbilangRupiah } from './terbilang.ts';
 
 /**
  * Format number into Indonesian Rupiah format (e.g., Rp 1.500.000)
  */
 export function formatRupiah(amount: number): string {
   return 'Rp ' + (amount || 0).toLocaleString('id-ID');
+}
+
+/**
+ * Helper to embed base64/dataURL signature image (PNG or JPG) into pdf-lib
+ */
+async function embedSignatureImage(pdfDoc: PDFDocument, dataUrl?: string) {
+  if (!dataUrl) return null;
+  try {
+    const isDataUrl = dataUrl.startsWith('data:');
+    const base64Data = isDataUrl ? dataUrl.split(',')[1] : dataUrl;
+    if (!base64Data) return null;
+
+    const imgBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+    if (dataUrl.startsWith('data:image/jpeg') || dataUrl.startsWith('data:image/jpg')) {
+      return await pdfDoc.embedJpg(imgBytes);
+    }
+    return await pdfDoc.embedPng(imgBytes);
+  } catch (err) {
+    console.warn('Gagal memproses gambar tanda tangan ke PDF, fallback ke stempel teks:', err);
+    return null;
+  }
 }
 
 /**
@@ -20,6 +42,21 @@ export async function generateOfficialFormPdf(doc: FormDocument): Promise<PDFDoc
   const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const fontOblique = await pdfDoc.embedFont(StandardFonts.HelveticaOblique);
+
+  // Resolve numeric total & terbilang safely
+  const numericTotal =
+    typeof doc.totalAmount === 'number' && !Number.isNaN(doc.totalAmount)
+      ? doc.totalAmount
+      : Number(String(doc.totalAmount ?? 0).replace(/[^0-9.-]+/g, '')) ||
+        (doc.items || []).reduce(
+          (sum, it) => sum + (Number(it.total) || Number(it.qty || 0) * Number(it.unitPrice || 0)),
+          0
+        );
+
+  const resolvedTerbilang =
+    doc.terbilang && doc.terbilang.trim() !== '' && doc.terbilang.trim().toLowerCase() !== 'nol rupiah'
+      ? doc.terbilang
+      : terbilangRupiah(numericTotal);
 
   // Palette
   const colorPrimary = rgb(0.08, 0.18, 0.36); // Deep Navy CLX
@@ -372,7 +409,7 @@ export async function generateOfficialFormPdf(doc: FormDocument): Promise<PDFDoc
     color: colorPrimary,
   });
 
-  const grandTotalText = formatRupiah(doc.totalAmount);
+  const grandTotalText = formatRupiah(numericTotal);
   const grandTotalW = fontBold.widthOfTextAtSize(grandTotalText, 10);
   page.drawText(grandTotalText, {
     x: width - margin - grandTotalW - 8,
@@ -403,7 +440,7 @@ export async function generateOfficialFormPdf(doc: FormDocument): Promise<PDFDoc
     color: colorPrimary,
   });
 
-  const terbilangFormatted = `# ${doc.terbilang || 'Nol Rupiah'} #`;
+  const terbilangFormatted = `# ${resolvedTerbilang || 'Nol Rupiah'} #`;
   const terbilangSafe = terbilangFormatted.length > 98 ? terbilangFormatted.slice(0, 95) + '...' : terbilangFormatted;
   page.drawText(terbilangSafe, {
     x: margin + 8,
@@ -503,63 +540,91 @@ export async function generateOfficialFormPdf(doc: FormDocument): Promise<PDFDoc
       color: colorPrimary,
     });
 
-    // If signed, draw official digital stamp with seal
+    // If signed, draw official signature image (if available) or digital stamp seal
     if (sb.stamp) {
-      // Draw Seal Badge
-      const stampBoxY = cursorY - 58;
-      page.drawRectangle({
-        x: boxX + 6,
-        y: stampBoxY,
-        width: sigBoxW - 12,
-        height: 38,
-        color: rgb(0.92, 0.98, 0.94),
-        borderColor: colorSuccess,
-        borderWidth: 1,
-      });
-
-      const stampVerified = 'DIGITALLY SIGNED';
-      const svW = fontBold.widthOfTextAtSize(stampVerified, 6.5);
-      page.drawText(stampVerified, {
-        x: boxX + 6 + (sigBoxW - 12 - svW) / 2,
-        y: stampBoxY + 28,
-        size: 6.5,
-        font: fontBold,
-        color: colorSuccess,
-      });
-
-      const signerName = sb.stamp.userName || sb.defaultName;
-      const signerSafe = signerName.length > 15 ? signerName.slice(0, 14) + '.' : signerName;
-      const snW = fontBold.widthOfTextAtSize(signerSafe, 6.5);
-      page.drawText(signerSafe, {
-        x: boxX + 6 + (sigBoxW - 12 - snW) / 2,
-        y: stampBoxY + 18,
-        size: 6.5,
-        font: fontBold,
-        color: colorDark,
-      });
-
+      const embeddedSig = await embedSignatureImage(pdfDoc, sb.stamp.signatureImage);
       const dateOnly = sb.stamp.signedAt?.split('T')[0] || doc.date;
-      const dtW = fontRegular.widthOfTextAtSize(dateOnly, 5.5);
-      page.drawText(dateOnly, {
-        x: boxX + 6 + (sigBoxW - 12 - dtW) / 2,
-        y: stampBoxY + 10,
-        size: 5.5,
-        font: fontRegular,
-        color: rgb(0.3, 0.35, 0.4),
-      });
-
       const hashShort = `ID: ${sb.stamp.digitalHash?.slice(0, 8) || 'VERIFIED'}`;
-      const hsW = fontRegular.widthOfTextAtSize(hashShort, 5);
-      page.drawText(hashShort, {
-        x: boxX + 6 + (sigBoxW - 12 - hsW) / 2,
-        y: stampBoxY + 3,
-        size: 5,
-        font: fontRegular,
-        color: rgb(0.4, 0.4, 0.4),
-      });
+
+      if (embeddedSig) {
+        // Draw uploaded signature/paraf image centered in the box
+        const maxSigW = sigBoxW - 16;
+        const maxSigH = 36;
+        const sigDims = embeddedSig.scaleToFit(maxSigW, maxSigH);
+        const sigY = cursorY - 20 - sigDims.height - (maxSigH - sigDims.height) / 2;
+
+        page.drawImage(embeddedSig, {
+          x: boxX + (sigBoxW - sigDims.width) / 2,
+          y: sigY,
+          width: sigDims.width,
+          height: sigDims.height,
+        });
+
+        // Subtle verification metadata below signature image
+        const metaText = `${dateOnly} • ${hashShort}`;
+        const mw = fontRegular.widthOfTextAtSize(metaText, 5);
+        page.drawText(metaText, {
+          x: boxX + (sigBoxW - mw) / 2,
+          y: cursorY - sigBoxH + 17,
+          size: 5,
+          font: fontRegular,
+          color: colorSuccess,
+        });
+      } else {
+        // Fallback: Draw Seal Badge when user has no signatureImage uploaded
+        const stampBoxY = cursorY - 58;
+        page.drawRectangle({
+          x: boxX + 6,
+          y: stampBoxY,
+          width: sigBoxW - 12,
+          height: 38,
+          color: rgb(0.92, 0.98, 0.94),
+          borderColor: colorSuccess,
+          borderWidth: 1,
+        });
+
+        const stampVerified = 'DIGITALLY SIGNED';
+        const svW = fontBold.widthOfTextAtSize(stampVerified, 6.5);
+        page.drawText(stampVerified, {
+          x: boxX + 6 + (sigBoxW - 12 - svW) / 2,
+          y: stampBoxY + 28,
+          size: 6.5,
+          font: fontBold,
+          color: colorSuccess,
+        });
+
+        const signerName = sb.stamp.userName || sb.defaultName;
+        const signerSafe = signerName.length > 15 ? signerName.slice(0, 14) + '.' : signerName;
+        const snW = fontBold.widthOfTextAtSize(signerSafe, 6.5);
+        page.drawText(signerSafe, {
+          x: boxX + 6 + (sigBoxW - 12 - snW) / 2,
+          y: stampBoxY + 18,
+          size: 6.5,
+          font: fontBold,
+          color: colorDark,
+        });
+
+        const dtW = fontRegular.widthOfTextAtSize(dateOnly, 5.5);
+        page.drawText(dateOnly, {
+          x: boxX + 6 + (sigBoxW - 12 - dtW) / 2,
+          y: stampBoxY + 10,
+          size: 5.5,
+          font: fontRegular,
+          color: rgb(0.3, 0.35, 0.4),
+        });
+
+        const hsW = fontRegular.widthOfTextAtSize(hashShort, 5);
+        page.drawText(hashShort, {
+          x: boxX + 6 + (sigBoxW - 12 - hsW) / 2,
+          y: stampBoxY + 3,
+          size: 5,
+          font: fontRegular,
+          color: rgb(0.4, 0.4, 0.4),
+        });
+      }
     } else {
       // Empty waiting placeholder or Not Required if CEO and <= 10 Juta
-      const isCeoNotRequired = sb.role === 'CEO' && !requiresCeoApproval(doc.totalAmount);
+      const isCeoNotRequired = sb.role === 'CEO' && !requiresCeoApproval(numericTotal);
       const waitText = isCeoNotRequired ? 'N/A (<= 10 Jt)' : '(Menunggu)';
       const wtW = fontOblique.widthOfTextAtSize(waitText, 7);
       page.drawText(waitText, {
