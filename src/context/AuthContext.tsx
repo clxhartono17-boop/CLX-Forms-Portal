@@ -34,6 +34,7 @@ interface AuthContextType {
     signatureUrl?: string;
   }) => Promise<{ success: boolean; message: string; user: User }>;
   updateUserRole: (userId: string, newRole: UserRole, newTitle?: string) => Promise<User>;
+  updateUserSignature: (userId: string, signatureUrl: string) => void;
   refreshRegisteredUsers: () => Promise<void>;
   loginUser: (email: string, password?: string) => { success: boolean; message: string };
   logout: () => void;
@@ -58,6 +59,21 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const REGISTERED_USERS_KEY = 'clx_registered_users_v4';
 const ACTIVE_USER_KEY = 'clx_active_user_v4';
 
+/**
+ * Generates a clean SVG calligraphic signature dataUrl for built-in C-Level officers
+ * so their digital signature always renders on screen and in PDFs.
+ */
+function buildDefaultOfficerSignature(fullName: string, roleLabel: string): string {
+  const safeName = fullName.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const safeRole = roleLabel.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="80" viewBox="0 0 240 80">
+    <path d="M18 52 C42 18, 65 64, 92 34 C112 14, 134 58, 165 30 C184 16, 202 48, 222 36" fill="none" stroke="#0f2b5b" stroke-width="2.6" stroke-linecap="round"/>
+    <path d="M28 60 Q120 52 212 58" fill="none" stroke="#059669" stroke-width="1.4" stroke-linecap="round"/>
+    <text x="120" y="72" text-anchor="middle" font-family="Georgia, serif" font-style="italic" font-weight="bold" font-size="11" fill="#0f2b5b">${safeName} (${safeRole})</text>
+  </svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
 // Pre-registered official C-Level approval officers in Master Login
 // Staff/Maker & CSO accounts can be freely registered by anyone; CEO/COO/CFO are Admin-only
 const INITIAL_OFFICERS: User[] = [
@@ -71,6 +87,7 @@ const INITIAL_OFFICERS: User[] = [
     title: 'Administrator & CEO',
     phone: '0811902123',
     registeredAt: '2026-10-28T08:00:00Z',
+    signatureUrl: buildDefaultOfficerSignature('Hartono', 'CEO'),
   },
   {
     id: 'usr_hartono_cso',
@@ -82,6 +99,7 @@ const INITIAL_OFFICERS: User[] = [
     title: 'Chief Service Officer',
     phone: '0811902123',
     registeredAt: '2026-10-28T08:05:00Z',
+    signatureUrl: buildDefaultOfficerSignature('Hartono Darmawan', 'CSO'),
   },
   {
     id: 'usr_dimas_cso',
@@ -93,6 +111,7 @@ const INITIAL_OFFICERS: User[] = [
     title: 'Chief Strategy Officer',
     phone: '0811902124',
     registeredAt: '2026-10-28T08:05:00Z',
+    signatureUrl: buildDefaultOfficerSignature('Dimas Wicaksono', 'CSO'),
   },
   {
     id: 'usr_hendrik_coo',
@@ -104,6 +123,7 @@ const INITIAL_OFFICERS: User[] = [
     title: 'Chief Operating Officer',
     phone: '0812990011',
     registeredAt: '2026-10-28T08:10:00Z',
+    signatureUrl: buildDefaultOfficerSignature('Hendrik Pratama', 'COO'),
   },
   {
     id: 'usr_siti_cfo',
@@ -115,6 +135,7 @@ const INITIAL_OFFICERS: User[] = [
     title: 'Chief Financial Officer',
     phone: '0813998822',
     registeredAt: '2026-10-28T08:15:00Z',
+    signatureUrl: buildDefaultOfficerSignature('Siti Rahmawati', 'CFO'),
   },
   {
     id: 'usr_hartono_ceo',
@@ -126,6 +147,7 @@ const INITIAL_OFFICERS: User[] = [
     title: 'Chief Executive Officer',
     phone: '0818001122',
     registeredAt: '2026-10-28T08:20:00Z',
+    signatureUrl: buildDefaultOfficerSignature('Hartono Wijaya', 'CEO'),
   },
 ];
 
@@ -139,7 +161,16 @@ function mergeUsersByEmail(baseUsers: User[], incomingUsers: User[]): User[] {
     const key = (u.email || '').trim().toLowerCase();
     if (!key) continue;
     const prev = byEmail.get(key);
-    byEmail.set(key, prev ? { ...prev, ...u } : u);
+    byEmail.set(
+      key,
+      prev
+        ? {
+            ...prev,
+            ...u,
+            signatureUrl: u.signatureUrl || prev.signatureUrl,
+          }
+        : u
+    );
   }
   return Array.from(byEmail.values());
 }
@@ -167,7 +198,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && parsed.email) {
-          return parsed;
+          const matched = INITIAL_OFFICERS.find(
+            o => o.email.trim().toLowerCase() === parsed.email.trim().toLowerCase()
+          );
+          return matched && !parsed.signatureUrl
+            ? { ...parsed, signatureUrl: matched.signatureUrl }
+            : parsed;
         }
       }
     } catch (e) {
@@ -196,7 +232,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const match = merged.find(
               u => u.email.trim().toLowerCase() === curr.email.trim().toLowerCase()
             );
-            return match ? { ...curr, role: match.role, title: match.title } : curr;
+            return match
+              ? {
+                  ...curr,
+                  role: match.role,
+                  title: match.title,
+                  signatureUrl: match.signatureUrl || curr.signatureUrl,
+                }
+              : curr;
           });
           return merged;
         });
@@ -286,6 +329,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (target) {
       setCurrentUser(target);
     }
+  };
+
+  const updateUserSignature = (userId: string, signatureUrl: string) => {
+    setRegisteredUsers(prev =>
+      prev.map(u => (u.id === userId ? { ...u, signatureUrl } : u))
+    );
+    setCurrentUser(curr => (curr && curr.id === userId ? { ...curr, signatureUrl } : curr));
   };
 
   const registerUser = async (userData: {
@@ -505,6 +555,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isLoggedIn,
         registerUser,
         updateUserRole,
+        updateUserSignature,
         refreshRegisteredUsers,
         loginUser,
         logout,
