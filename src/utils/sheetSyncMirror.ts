@@ -1,5 +1,6 @@
 import type { FormDocument, FormType, ApprovalStatus, UserRole, Division } from '../types/index.ts';
 import { requiresCeoApproval } from './approvalRules.ts';
+import { terbilangRupiah } from './terbilang.ts';
 
 /**
  * Safely parses numeric or currency strings from Google Sheets (e.g. 1500000, "Rp 1.500.000", "23,450").
@@ -170,12 +171,24 @@ export function parseSheetRowsToForms(
       requesterName,
       purpose,
       totalAmount,
+      terbilang: terbilangRupiah(totalAmount),
       paymentMethod,
       bankName,
       settlementDate,
       notes,
       status,
       currentAssigneeRole: resolveAssigneeFromStatus(status, totalAmount),
+      signatures: requesterName
+        ? {
+            maker: {
+              role: 'Staff',
+              userName: requesterName,
+              userTitle: 'Staff',
+              signedAt: date || new Date().toISOString().split('T')[0],
+              digitalHash: `SHA256-CLX-MKR-${docNumber.replace(/[^a-zA-Z0-9]/g, '').slice(-6)}`,
+            },
+          }
+        : {},
       googleSheets: {
         synced: true,
         rowNumber: actualRow,
@@ -232,6 +245,8 @@ export function mirrorSheetFormsWithLocal(
       const bankAccountName = sf.bankAccountName || parsedBank.bankAccountName || existingLocal?.bankAccountName || '';
 
       const purpose = (sf.purpose ?? existingLocal?.purpose ?? '').trim();
+      const requesterName = sf.requesterName || existingLocal?.requesterName || '';
+      const date = sf.date || existingLocal?.date || new Date().toISOString().split('T')[0];
 
       // Keep local line items only if the total amount still matches; otherwise rebuild a clean line item reflecting sheet total
       const shouldKeepLocalItems =
@@ -253,16 +268,61 @@ export function mirrorSheetFormsWithLocal(
             },
           ];
 
+      // Merge attachments while preserving local dataUrl blobs
+      const incomingAtts = sf.attachments || [];
+      const localAtts = existingLocal?.attachments || [];
+      let mergedAttachments = localAtts;
+      if (incomingAtts.length > 0) {
+        mergedAttachments = incomingAtts.map((att, idx) => {
+          if (att.dataUrl) return att;
+          const matchLocal =
+            localAtts.find(la => la.id === att.id || la.name === att.name) || localAtts[idx];
+          return matchLocal?.dataUrl ? { ...att, dataUrl: matchLocal.dataUrl } : att;
+        });
+      }
+
+      // Merge signatures per role while keeping local signatureImage & ensuring maker stamp exists
+      const mergedSignatures: FormDocument['signatures'] = {
+        ...(existingLocal?.signatures || {}),
+        ...(sf.signatures || {}),
+      };
+      (['maker', 'cso', 'coo', 'cfo', 'ceo'] as const).forEach(roleKey => {
+        const incStamp = sf.signatures?.[roleKey];
+        const locStamp = existingLocal?.signatures?.[roleKey];
+        if (incStamp || locStamp) {
+          mergedSignatures[roleKey] = {
+            ...(locStamp || {}),
+            ...(incStamp || {}),
+            signatureImage: incStamp?.signatureImage || locStamp?.signatureImage,
+          } as FormDocument['signatures'][typeof roleKey];
+        }
+      });
+
+      if (!mergedSignatures.maker && requesterName) {
+        mergedSignatures.maker = {
+          role: 'Staff',
+          userName: requesterName,
+          userTitle: sf.requesterRole || existingLocal?.requesterRole || 'Staff',
+          signedAt: date,
+          digitalHash: `SHA256-CLX-MKR-${docNumber.replace(/[^a-zA-Z0-9]/g, '').slice(-6)}`,
+        };
+      }
+
+      const resolvedTerbilang =
+        existingLocal && existingLocal.totalAmount === totalAmount && existingLocal.terbilang
+          ? existingLocal.terbilang
+          : sf.terbilang || terbilangRupiah(totalAmount);
+
       return {
         id: existingLocal?.id || sf.id || `sheet-${index + 1}-${docNumber.replace(/[^a-zA-Z0-9]/g, '_')}`,
         sequenceNumber: Number(sf.sequenceNumber ?? existingLocal?.sequenceNumber ?? index + 1),
         formType,
         docNumber,
-        date: sf.date || existingLocal?.date || new Date().toISOString().split('T')[0],
+        date,
         targetDate: sf.targetDate || existingLocal?.targetDate || sf.date || '',
         settlementDate: sf.settlementDate || existingLocal?.settlementDate,
         division: (sf.division || existingLocal?.division || 'Finance') as Division,
-        requesterName: sf.requesterName || existingLocal?.requesterName || '',
+        requesterName,
         requesterEmail: sf.requesterEmail || existingLocal?.requesterEmail || '',
         requesterRole: sf.requesterRole || existingLocal?.requesterRole || 'Staff',
         purpose,
@@ -276,16 +336,21 @@ export function mirrorSheetFormsWithLocal(
         bankAccountName,
         items,
         totalAmount,
-        terbilang: existingLocal && existingLocal.totalAmount === totalAmount ? existingLocal.terbilang : sf.terbilang || '',
-        attachments: existingLocal?.attachments || sf.attachments || [],
+        terbilang: resolvedTerbilang,
+        attachments: mergedAttachments,
         status,
         currentAssigneeRole,
-        signatures: existingLocal?.signatures || sf.signatures || {},
+        signatures: mergedSignatures,
         rejectionReason: existingLocal?.rejectionReason || sf.rejectionReason,
         createdAt: existingLocal?.createdAt || sf.createdAt || new Date().toISOString(),
         updatedAt: sf.updatedAt || existingLocal?.updatedAt || new Date().toISOString(),
         googleSheets: sf.googleSheets || existingLocal?.googleSheets || { synced: true, sheetName: 'Rekapan Form' },
-        googleDrive: sf.googleDrive || existingLocal?.googleDrive || { uploaded: false, folderPath: '' },
+        googleDrive:
+          sf.googleDrive?.fileUrl
+            ? sf.googleDrive
+            : existingLocal?.googleDrive?.fileUrl
+              ? existingLocal.googleDrive
+              : sf.googleDrive || existingLocal?.googleDrive || { uploaded: false, folderPath: '' },
       };
     });
 }
