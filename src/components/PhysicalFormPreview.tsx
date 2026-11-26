@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FormDocument } from '../types/index.ts';
 import { formatRupiah, generateOfficialFormPdf, generateMergedPdf, downloadPdf } from '../utils/pdfGenerator.ts';
+import { terbilangRupiah } from '../utils/terbilang.ts';
 import { requiresCeoApproval } from '../utils/approvalRules.ts';
 import { Printer, Download, ExternalLink, CheckCircle, FileText, Paperclip, Loader2 } from 'lucide-react';
 
@@ -15,10 +16,28 @@ export const PhysicalFormPreview: React.FC<PhysicalFormPreviewProps> = ({
 }) => {
   const [isGenerating, setIsGenerating] = useState(false);
 
+  const numericTotal =
+    typeof doc.totalAmount === 'number' && !Number.isNaN(doc.totalAmount)
+      ? doc.totalAmount
+      : Number(String(doc.totalAmount ?? 0).replace(/[^0-9.-]+/g, '')) ||
+        (doc.items || []).reduce(
+          (sum, it) => sum + (Number(it.total) || Number(it.qty || 0) * Number(it.unitPrice || 0)),
+          0
+        );
+
+  const resolvedTerbilang =
+    doc.terbilang && doc.terbilang.trim() !== '' && doc.terbilang.trim().toLowerCase() !== 'nol rupiah'
+      ? doc.terbilang
+      : terbilangRupiah(numericTotal);
+
   const handleDownloadSinglePdf = async () => {
     setIsGenerating(true);
     try {
-      const pdf = await generateOfficialFormPdf(doc);
+      const pdf = await generateOfficialFormPdf({
+        ...doc,
+        totalAmount: numericTotal,
+        terbilang: resolvedTerbilang,
+      });
       const bytes = await pdf.save();
       const filename = `${doc.docNumber.replace(/[\/\\]/g, '_')}_form.pdf`;
       downloadPdf(bytes, filename);
@@ -32,7 +51,11 @@ export const PhysicalFormPreview: React.FC<PhysicalFormPreviewProps> = ({
   const handleDownloadMergedPdf = async () => {
     setIsGenerating(true);
     try {
-      const bytes = await generateMergedPdf(doc);
+      const bytes = await generateMergedPdf({
+        ...doc,
+        totalAmount: numericTotal,
+        terbilang: resolvedTerbilang,
+      });
       const filename = `${doc.docNumber.replace(/[\/\\]/g, '_')}_merged.pdf`;
       downloadPdf(bytes, filename);
     } catch (e) {
@@ -246,7 +269,7 @@ export const PhysicalFormPreview: React.FC<PhysicalFormPreviewProps> = ({
                   TOTAL PEMBAYARAN / TOTAL AMOUNT :
                 </td>
                 <td className="py-2.5 px-3 text-right text-blue-950 font-black text-sm">
-                  {formatRupiah(doc.totalAmount)}
+                  {formatRupiah(numericTotal)}
                 </td>
               </tr>
             </tfoot>
@@ -259,7 +282,7 @@ export const PhysicalFormPreview: React.FC<PhysicalFormPreviewProps> = ({
             Terbilang (Number to Words):
           </div>
           <div className="text-xs font-semibold italic text-blue-950">
-            # {doc.terbilang || 'Nol Rupiah'} #
+            # {resolvedTerbilang || 'Nol Rupiah'} #
           </div>
         </div>
 
@@ -314,7 +337,7 @@ export const PhysicalFormPreview: React.FC<PhysicalFormPreviewProps> = ({
                         {box.stamp.digitalHash?.slice(0, 10)}
                       </div>
                     </div>
-                  ) : box.role === 'CEO' && !requiresCeoApproval(doc.totalAmount) ? (
+                  ) : box.role === 'CEO' && !requiresCeoApproval(numericTotal) ? (
                     <div className="border border-slate-200 bg-slate-50 text-slate-400 p-1 rounded text-center w-full">
                       <div className="text-[8px] font-bold uppercase text-slate-500">Tidak Diperlukan</div>
                       <div className="text-[7px] text-slate-400 font-mono mt-0.5">Nilai &le; 10 Juta</div>
